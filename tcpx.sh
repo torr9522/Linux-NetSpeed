@@ -17,7 +17,7 @@ export PATH
 # PLAIN='\033[0m'
 
 sh_ver="100.0.4.15"
-github="raw.githubusercontent.com/ylx2016/Linux-NetSpeed/master"
+github="raw.githubusercontent.com/torr9522/Linux-NetSpeed/tcpx.sh"
 
 imgurl=""
 headurl=""
@@ -426,20 +426,31 @@ check_cn() {
 	fi
 
 	# 获取当前IP地址，设置超时为3秒
-	#current_ip=$(curl -s --max-time 3 https://ip.im -4)
+	current_ip=$(curl -s --max-time 3 https://api.ipify.org)
 
 	# 使用ip-api.com查询IP所在国家，设置超时为3秒
-	response=$(curl -s --max-time 3 ip.im/info -4 | sed -n '/CountryCode/s/.*://p')
+	response=$(curl -s --max-time 3 "http://ip-api.com/json/$current_ip")
 
 	# 检查国家是否为中国
 	country=$(echo "$response" | jq -r '.countryCode')
 	if [[ "$country" == "CN" ]]; then
 		local suffixes=(
+			"https://gh.con.sh/"
 			"https://gh-proxy.com/"
-			"https://ghfast.top"
+			"https://ghp.ci/"
+			"https://gh.m-l.cc/"
 			"https://down.npee.cn/?"
+			"https://mirror.ghproxy.com/"
+			"https://ghps.cc/"
+			"https://gh.api.99988866.xyz/"
+			"https://git.886.be/"
 			"https://hub.gitmirror.com/"
+			"https://pd.zwc365.com/"
 			"https://gh.ddlc.top/"
+			"https://slink.ltd/"
+			"https://github.moeyy.xyz/"
+			"https://ghproxy.crazypeace.workers.dev/"
+			"https://gh.h233.eu.org/"
 		)
 
 		# 循环遍历每个后缀并测试组合的链接
@@ -534,8 +545,8 @@ installbbr() {
 			if [[ ${bit} == "x86_64" ]]; then
 				echo -e "如果下载地址出错，可能当前正在更新，超过半天还是出错请反馈，大陆自行解决污染问题"
 
-				headurl=https://github.com/ylx2016/kernel/releases/download/Centos_Kernel_6.1.35_latest_bbr_2023.06.22-0855/kernel-headers-6.1.35-1.x86_64.rpm
-				imgurl=https://github.com/ylx2016/kernel/releases/download/Centos_Kernel_6.1.35_latest_bbr_2023.06.22-0855/kernel-6.1.35-1.x86_64.rpm
+				headurl=https://github.com/torr9522/Linux-NetSpeed/releases/download/Centos_Kernel_6.1.35_latest_bbr_2023.06.22-0855/kernel-headers-6.1.35-1.x86_64.rpm
+				imgurl=https://github.com/torr9522/Linux-NetSpeed/releases/download/Centos_Kernel_6.1.35_latest_bbr_2023.06.22-0855/kernel-6.1.35-1.x86_64.rpm
 
 				check_empty $imgurl
 				headurl=$(check_cn $headurl)
@@ -553,14 +564,14 @@ installbbr() {
 	elif [[ "${OS_type}" == "Debian" ]]; then
 		if [[ ${bit} == "x86_64" ]]; then
 			echo -e "如果下载地址出错，可能当前正在更新，超过半天还是出错请反馈，大陆自行解决污染问题"
-			github_tag=$(curl -s 'https://api.github.com/repos/ylx2016/kernel/releases' | grep 'Debian_Kernel' | grep '_latest_bbr_' | head -n 1 | awk -F '"' '{print $4}' | awk -F '[/]' '{print $8}')
-			github_ver=$(curl -s 'https://api.github.com/repos/ylx2016/kernel/releases' | grep "${github_tag}" | grep 'deb' | grep 'headers' | awk -F '"' '{print $4}' | awk -F '[/]' '{print $9}' | awk -F '[-]' '{print $3}' | awk -F '[_]' '{print $1}')
+			github_tag=$(curl -s 'https://api.github.com/repos/torr9522/Linux-NetSpeed/releases' | grep 'Debian_Kernel' | grep '_latest_bbr_' | head -n 1 | awk -F '"' '{print $4}' | awk -F '[/]' '{print $8}')
+			github_ver=$(curl -s 'https://api.github.com/repos/torr9522/Linux-NetSpeed/releases' | grep "${github_tag}" | grep 'deb' | grep 'headers' | awk -F '"' '{print $4}' | awk -F '[/]' '{print $9}' | awk -F '[-]' '{print $3}' | awk -F '[_]' '{print $1}')
 			check_empty "$github_ver"
 			echo -e "获取的版本号为:${Green_font_prefix}${github_ver}${Font_color_suffix}"
 			kernel_version=$github_ver
 			detele_kernel_head
-			headurl=$(curl -s 'https://api.github.com/repos/ylx2016/kernel/releases' | grep "${github_tag}" | grep 'deb' | grep 'headers' | awk -F '"' '{print $4}')
-			imgurl=$(curl -s 'https://api.github.com/repos/ylx2016/kernel/releases' | grep "${github_tag}" | grep 'deb' | grep -v 'headers' | grep -v 'devel' | awk -F '"' '{print $4}')
+			headurl=$(curl -s 'https://api.github.com/repos/torr9522/Linux-NetSpeed/releases' | grep "${github_tag}" | grep 'deb' | grep 'headers' | awk -F '"' '{print $4}')
+			imgurl=$(curl -s 'https://api.github.com/repos/torr9522/Linux-NetSpeed/releases' | grep "${github_tag}" | grep 'deb' | grep -v 'headers' | grep -v 'devel' | awk -F '"' '{print $4}')
 
 			headurl=$(check_cn "$headurl")
 			imgurl=$(check_cn "$imgurl")
@@ -571,13 +582,13 @@ installbbr() {
 			dpkg -i linux-headers-d10.deb
 		elif [[ ${bit} == "aarch64" ]]; then
 			echo -e "如果下载地址出错，可能当前正在更新，超过半天还是出错请反馈，大陆自行解决污染问题"
-			github_tag=$(curl -s 'https://api.github.com/repos/ylx2016/kernel/releases' | grep 'Debian_Kernel' | grep '_arm64_' | grep '_bbr_' | head -n 1 | awk -F '"' '{print $4}' | awk -F '[/]' '{print $8}')
-			github_ver=$(curl -s 'https://api.github.com/repos/ylx2016/kernel/releases' | grep "${github_tag}" | grep 'deb' | grep 'headers' | awk -F '"' '{print $4}' | awk -F '[/]' '{print $9}' | awk -F '[-]' '{print $3}' | awk -F '[_]' '{print $1}')
+			github_tag=$(curl -s 'https://api.github.com/repos/torr9522/Linux-NetSpeed/releases' | grep 'Debian_Kernel' | grep '_arm64_' | grep '_bbr_' | head -n 1 | awk -F '"' '{print $4}' | awk -F '[/]' '{print $8}')
+			github_ver=$(curl -s 'https://api.github.com/repos/torr9522/Linux-NetSpeed/releases' | grep "${github_tag}" | grep 'deb' | grep 'headers' | awk -F '"' '{print $4}' | awk -F '[/]' '{print $9}' | awk -F '[-]' '{print $3}' | awk -F '[_]' '{print $1}')
 			echo -e "获取的版本号为:${Green_font_prefix}${github_ver}${Font_color_suffix}"
 			kernel_version=$github_ver
 			detele_kernel_head
-			headurl=$(curl -s 'https://api.github.com/repos/ylx2016/kernel/releases' | grep "${github_tag}" | grep 'deb' | grep 'headers' | awk -F '"' '{print $4}')
-			imgurl=$(curl -s 'https://api.github.com/repos/ylx2016/kernel/releases' | grep "${github_tag}" | grep 'deb' | grep -v 'headers' | grep -v 'devel' | awk -F '"' '{print $4}')
+			headurl=$(curl -s 'https://api.github.com/repos/torr9522/Linux-NetSpeed/releases' | grep "${github_tag}" | grep 'deb' | grep 'headers' | awk -F '"' '{print $4}')
+			imgurl=$(curl -s 'https://api.github.com/repos/torr9522/Linux-NetSpeed/releases' | grep "${github_tag}" | grep 'deb' | grep -v 'headers' | grep -v 'devel' | awk -F '"' '{print $4}')
 
 			check_empty "$imgurl"
 			headurl=$(check_cn "$headurl")
@@ -610,8 +621,8 @@ installbbrplus() {
 			if [[ ${bit} == "x86_64" ]]; then
 				kernel_version="4.14.129_bbrplus"
 				detele_kernel_head
-				headurl=https://github.com/cx9208/Linux-NetSpeed/raw/master/bbrplus/centos/7/kernel-headers-4.14.129-bbrplus.rpm
-				imgurl=https://github.com/cx9208/Linux-NetSpeed/raw/master/bbrplus/centos/7/kernel-4.14.129-bbrplus.rpm
+				headurl=https://raw.githubusercontent.com/torr9522/Linux-NetSpeed/tcpx.sh/bbrplus/centos/7/kernel-headers-4.14.129-bbrplus.rpm
+				imgurl=https://raw.githubusercontent.com/torr9522/Linux-NetSpeed/tcpx.sh/bbrplus/centos/7/kernel-4.14.129-bbrplus.rpm
 
 				headurl=$(check_cn $headurl)
 				imgurl=$(check_cn $imgurl)
@@ -629,8 +640,8 @@ installbbrplus() {
 		if [[ ${bit} == "x86_64" ]]; then
 			kernel_version="4.14.129-bbrplus"
 			detele_kernel_head
-			headurl=https://github.com/cx9208/Linux-NetSpeed/raw/master/bbrplus/debian-ubuntu/x64/linux-headers-4.14.129-bbrplus.deb
-			imgurl=https://github.com/cx9208/Linux-NetSpeed/raw/master/bbrplus/debian-ubuntu/x64/linux-image-4.14.129-bbrplus.deb
+			headurl=https://raw.githubusercontent.com/torr9522/Linux-NetSpeed/tcpx.sh/bbrplus/debian-ubuntu/x64/linux-headers-4.14.129-bbrplus.deb
+			imgurl=https://raw.githubusercontent.com/torr9522/Linux-NetSpeed/tcpx.sh/bbrplus/debian-ubuntu/x64/linux-image-4.14.129-bbrplus.deb
 
 			headurl=$(check_cn $headurl)
 			imgurl=$(check_cn $imgurl)
@@ -772,8 +783,8 @@ installxanmod() {
 		if [[ ${version} == "7" ]]; then
 			if [[ ${bit} == "x86_64" ]]; then
 				echo -e "如果下载地址出错，可能当前正在更新，超过半天还是出错请反馈，大陆自行解决污染问题"
-				headurl=https://github.com/ylx2016/kernel/releases/download/Centos_Kernel_5.15.95-xanmod1_lts_latest_2023.02.24-2159/kernel-headers-5.15.95_xanmod1-1.x86_64.rpm
-				imgurl=https://github.com/ylx2016/kernel/releases/download/Centos_Kernel_5.15.95-xanmod1_lts_latest_2023.02.24-2159/kernel-5.15.95_xanmod1-1.x86_64.rpm
+				headurl=https://github.com/torr9522/Linux-NetSpeed/releases/download/Centos_Kernel_5.15.95-xanmod1_lts_latest_2023.02.24-2159/kernel-headers-5.15.95_xanmod1-1.x86_64.rpm
+				imgurl=https://github.com/torr9522/Linux-NetSpeed/releases/download/Centos_Kernel_5.15.95-xanmod1_lts_latest_2023.02.24-2159/kernel-5.15.95_xanmod1-1.x86_64.rpm
 
 				check_empty $imgurl
 				headurl=$(check_cn $headurl)
@@ -788,8 +799,8 @@ installxanmod() {
 			fi
 		elif [[ ${version} == "8" ]]; then
 			echo -e "如果下载地址出错，可能当前正在更新，超过半天还是出错请反馈，大陆自行解决污染问题"
-			headurl=https://github.com/ylx2016/kernel/releases/download/Centos_Kernel_5.15.81-xanmod1_lts_C8_latest_2022.12.06-1614/kernel-headers-5.15.81_xanmod1-1.x86_64.rpm
-			imgurl=https://github.com/ylx2016/kernel/releases/download/Centos_Kernel_5.15.81-xanmod1_lts_C8_latest_2022.12.06-1614/kernel-5.15.81_xanmod1-1.x86_64.rpm
+			headurl=https://github.com/torr9522/Linux-NetSpeed/releases/download/Centos_Kernel_5.15.81-xanmod1_lts_C8_latest_2022.12.06-1614/kernel-headers-5.15.81_xanmod1-1.x86_64.rpm
+			imgurl=https://github.com/torr9522/Linux-NetSpeed/releases/download/Centos_Kernel_5.15.81-xanmod1_lts_C8_latest_2022.12.06-1614/kernel-5.15.81_xanmod1-1.x86_64.rpm
 
 			check_empty $imgurl
 			headurl=$(check_cn $headurl)
@@ -805,8 +816,8 @@ installxanmod() {
 
 		if [[ ${bit} == "x86_64" ]]; then
 			echo -e "如果下载地址出错，可能当前正在更新，超过半天还是出错请反馈，大陆自行解决污染问题"
-			headurl=https://github.com/ylx2016/kernel/releases/download/Debian_Kernel_5.15.95-xanmod1_lts_latest_2023.02.24-2210/linux-headers-5.15.95-xanmod1_5.15.95-xanmod1-1_amd64.deb
-			imgurl=https://github.com/ylx2016/kernel/releases/download/Debian_Kernel_5.15.95-xanmod1_lts_latest_2023.02.24-2210/linux-image-5.15.95-xanmod1_5.15.95-xanmod1-1_amd64.deb
+			headurl=https://github.com/torr9522/Linux-NetSpeed/releases/download/Debian_Kernel_5.15.95-xanmod1_lts_latest_2023.02.24-2210/linux-headers-5.15.95-xanmod1_5.15.95-xanmod1-1_amd64.deb
+			imgurl=https://github.com/torr9522/Linux-NetSpeed/releases/download/Debian_Kernel_5.15.95-xanmod1_lts_latest_2023.02.24-2210/linux-image-5.15.95-xanmod1_5.15.95-xanmod1-1_amd64.deb
 
 			check_empty $imgurl
 			headurl=$(check_cn $headurl)
@@ -836,8 +847,8 @@ installxanmod() {
 #2022.11.24 改为https://github.com/UJX6N/bbrplus-6.x_stable
 
 installbbrplusnew() {
-	github_ver_plus=$(curl -s https://api.github.com/repos/UJX6N/bbrplus-6.x_stable/releases | grep /bbrplus-6.x_stable/releases/tag/ | head -1 | awk -F "[/]" '{print $8}' | awk -F "[\"]" '{print $1}')
-	github_ver_plus_num=$(curl -s https://api.github.com/repos/UJX6N/bbrplus-6.x_stable/releases | grep /bbrplus-6.x_stable/releases/tag/ | head -1 | awk -F "[/]" '{print $8}' | awk -F "[\"]" '{print $1}' | awk -F "[-]" '{print $1}')
+	github_ver_plus=$(curl -s https://api.github.com/repos/torr9522/Linux-NetSpeed/releases | grep /Linux-NetSpeed/releases/tag/ | head -1 | awk -F "[/]" '{print $8}' | awk -F "[\"]" '{print $1}')
+	github_ver_plus_num=$(curl -s https://api.github.com/repos/torr9522/Linux-NetSpeed/releases | grep /Linux-NetSpeed/releases/tag/ | head -1 | awk -F "[/]" '{print $8}' | awk -F "[\"]" '{print $1}' | awk -F "[-]" '{print $1}')
 	echo -e "获取的UJX6N的bbrplus-6.x_stable版本号为:${Green_font_prefix}${github_ver_plus}${Font_color_suffix}"
 	echo -e "如果下载地址出错，可能当前正在更新，超过半天还是出错请反馈，大陆自行解决污染问题"
 	echo -e "${Green_font_prefix}安装失败这边反馈，内核问题给UJX6N反馈${Font_color_suffix}"
@@ -854,8 +865,8 @@ installbbrplusnew() {
 			if [[ ${bit} == "x86_64" ]]; then
 				kernel_version=${github_ver_plus_num}-bbrplus
 				detele_kernel_head
-				headurl=$(curl -s 'https://api.github.com/repos/UJX6N/bbrplus-6.x_stable/releases' | grep "${github_ver_plus}" | grep 'rpm' | grep 'headers' | grep 'el7' | awk -F '"' '{print $4}' | grep 'http')
-				imgurl=$(curl -s 'https://api.github.com/repos/UJX6N/bbrplus-6.x_stable/releases' | grep "${github_ver_plus}" | grep 'rpm' | grep -v 'devel' | grep -v 'headers' | grep -v 'Source' | grep 'el7' | awk -F '"' '{print $4}' | grep 'http')
+				headurl=$(curl -s 'https://api.github.com/repos/torr9522/Linux-NetSpeed/releases' | grep "${github_ver_plus}" | grep 'rpm' | grep 'headers' | grep 'el7' | awk -F '"' '{print $4}' | grep 'http')
+				imgurl=$(curl -s 'https://api.github.com/repos/torr9522/Linux-NetSpeed/releases' | grep "${github_ver_plus}" | grep 'rpm' | grep -v 'devel' | grep -v 'headers' | grep -v 'Source' | grep 'el7' | awk -F '"' '{print $4}' | grep 'http')
 
 				headurl=$(check_cn "$headurl")
 				imgurl=$(check_cn "$imgurl")
@@ -872,8 +883,8 @@ installbbrplusnew() {
 			if [[ ${bit} == "x86_64" ]]; then
 				kernel_version=${github_ver_plus_num}-bbrplus
 				detele_kernel_head
-				headurl=$(curl -s 'https://api.github.com/repos/UJX6N/bbrplus-6.x_stable/releases' | grep "${github_ver_plus}" | grep 'rpm' | grep 'headers' | grep 'el8.x86_64' | grep 'https' | awk -F '"' '{print $4}' | grep 'http')
-				imgurl=$(curl -s 'https://api.github.com/repos/UJX6N/bbrplus-6.x_stable/releases' | grep "${github_ver_plus}" | grep 'rpm' | grep -v 'devel' | grep -v 'headers' | grep -v 'Source' | grep 'el8.x86_64' | grep 'https' | awk -F '"' '{print $4}' | grep 'http')
+				headurl=$(curl -s 'https://api.github.com/repos/torr9522/Linux-NetSpeed/releases' | grep "${github_ver_plus}" | grep 'rpm' | grep 'headers' | grep 'el8.x86_64' | grep 'https' | awk -F '"' '{print $4}' | grep 'http')
+				imgurl=$(curl -s 'https://api.github.com/repos/torr9522/Linux-NetSpeed/releases' | grep "${github_ver_plus}" | grep 'rpm' | grep -v 'devel' | grep -v 'headers' | grep -v 'Source' | grep 'el8.x86_64' | grep 'https' | awk -F '"' '{print $4}' | grep 'http')
 
 				headurl=$(check_cn "$headurl")
 				imgurl=$(check_cn "$imgurl")
@@ -890,8 +901,8 @@ installbbrplusnew() {
 		if [[ ${bit} == "x86_64" ]]; then
 			kernel_version=${github_ver_plus_num}-bbrplus
 			detele_kernel_head
-			headurl=$(curl -s 'https://api.github.com/repos/UJX6N/bbrplus-6.x_stable/releases' | grep "${github_ver_plus}" | grep 'https' | grep 'amd64.deb' | grep 'headers' | awk -F '"' '{print $4}' | grep 'http')
-			imgurl=$(curl -s 'https://api.github.com/repos/UJX6N/bbrplus-6.x_stable/releases' | grep "${github_ver_plus}" | grep 'https' | grep 'amd64.deb' | grep 'image' | awk -F '"' '{print $4}' | grep 'http')
+			headurl=$(curl -s 'https://api.github.com/repos/torr9522/Linux-NetSpeed/releases' | grep "${github_ver_plus}" | grep 'https' | grep 'amd64.deb' | grep 'headers' | awk -F '"' '{print $4}' | grep 'http')
+			imgurl=$(curl -s 'https://api.github.com/repos/torr9522/Linux-NetSpeed/releases' | grep "${github_ver_plus}" | grep 'https' | grep 'amd64.deb' | grep 'image' | awk -F '"' '{print $4}' | grep 'http')
 
 			headurl=$(check_cn "$headurl")
 			imgurl=$(check_cn "$imgurl")
@@ -903,8 +914,8 @@ installbbrplusnew() {
 		elif [[ ${bit} == "aarch64" ]]; then
 			kernel_version=${github_ver_plus_num}-bbrplus
 			detele_kernel_head
-			headurl=$(curl -s 'https://api.github.com/repos/UJX6N/bbrplus-6.x_stable/releases' | grep "${github_ver_plus}" | grep 'https' | grep 'arm64.deb' | grep 'headers' | awk -F '"' '{print $4}')
-			imgurl=$(curl -s 'https://api.github.com/repos/UJX6N/bbrplus-6.x_stable/releases' | grep "${github_ver_plus}" | grep 'https' | grep 'arm64.deb' | grep 'image' | awk -F '"' '{print $4}')
+			headurl=$(curl -s 'https://api.github.com/repos/torr9522/Linux-NetSpeed/releases' | grep "${github_ver_plus}" | grep 'https' | grep 'arm64.deb' | grep 'headers' | awk -F '"' '{print $4}')
+			imgurl=$(curl -s 'https://api.github.com/repos/torr9522/Linux-NetSpeed/releases' | grep "${github_ver_plus}" | grep 'https' | grep 'arm64.deb' | grep 'image' | awk -F '"' '{print $4}')
 
 			headurl=$(check_cn "$headurl")
 			imgurl=$(check_cn "$imgurl")
@@ -1079,7 +1090,7 @@ startlotserver() {
 		apt-get update || apt-get --allow-releaseinfo-change update
 		apt-get install ethtool -y
 	fi
-	echo | bash <(wget --no-check-certificate -qO- https://raw.githubusercontent.com/fei5seven/lotServer/master/lotServerInstall.sh) install
+	echo | bash <(wget --no-check-certificate -qO- https://raw.githubusercontent.com/torr9522/Linux-NetSpeed/tcpx.sh/selfhost/lotServerInstall.sh) install
 	sed -i '/advinacc/d' /appex/etc/config
 	sed -i '/maxmode/d' /appex/etc/config
 	echo -e "advinacc=\"1\"
@@ -1140,7 +1151,7 @@ startbrutal() {
 	# 如果 headers_status 为 "已匹配headers"，执行外部脚本
 	if [[ "$headers_status" == "已匹配" ]]; then
 		echo "Headers 已匹配，开始编译..."
-		bash <(curl -fsSL https://tcp.hy2.sh/)
+		bash <(curl -fsSL https://raw.githubusercontent.com/torr9522/Linux-NetSpeed/tcpx.sh/selfhost/hy2.sh)
 		# 检查 brutal 模块是否加载
 		if lsmod | grep -q "brutal"; then
 			echo "brutal 模块已加载，请重新运行脚本查看状态"
@@ -1168,7 +1179,7 @@ remove_bbr_lotserver() {
 	rm -rf bbrmod
 
 	if [[ -e /appex/bin/lotServer.sh ]]; then
-		echo | bash <(wget -qO- https://raw.githubusercontent.com/fei5seven/lotServer/master/lotServerInstall.sh) uninstall
+		echo | bash <(wget -qO- https://raw.githubusercontent.com/torr9522/Linux-NetSpeed/tcpx.sh/selfhost/lotServerInstall.sh) uninstall
 	fi
 	clear
 	# echo -e "${Info}:清除bbr/lotserver加速完成。"
@@ -1245,7 +1256,7 @@ remove_all() {
 	sed -i '/net.ipv4.tcp_timestamps/d' /etc/sysctl.conf
 	sed -i '/net.ipv4.tcp_max_orphans/d' /etc/sysctl.conf
 	if [[ -e /appex/bin/lotServer.sh ]]; then
-		bash <(wget -qO- https://raw.githubusercontent.com/fei5seven/lotServer/master/lotServerInstall.sh) uninstall
+		bash <(wget -qO- https://raw.githubusercontent.com/torr9522/Linux-NetSpeed/tcpx.sh/selfhost/lotServerInstall.sh) uninstall
 	fi
 	clear
 	echo -e "${Info}:清除加速完成。"
@@ -1268,7 +1279,7 @@ optimizing_ddcc() {
 Update_Shell() {
 	local shell_file
 	shell_file="$(readlink -f "$0")"
-	local shell_url="https://raw.githubusercontent.com/ylx2016/Linux-NetSpeed/master/tcpx.sh"
+	local shell_url="https://raw.githubusercontent.com/torr9522/Linux-NetSpeed/tcpx.sh/tcpx.sh"
 
 	# 下载最新版本的脚本
 	wget -O "/tmp/tcpx.sh" "$(check_cn $shell_url)" &>/dev/null
@@ -1294,13 +1305,13 @@ Update_Shell() {
 #切换到卸载内核版本
 gototcp() {
 	clear
-	bash <(wget -qO- https://github.com/ylx2016/Linux-NetSpeed/raw/master/tcp.sh)
+	bash <(wget -qO- https://raw.githubusercontent.com/torr9522/Linux-NetSpeed/tcp.sh/tcp.sh)
 }
 
 #切换到秋水逸冰BBR安装脚本
 gototeddysun_bbr() {
 	clear
-	bash <(wget -qO- https://github.com/teddysun/across/raw/master/bbr.sh)
+	bash <(wget -qO- https://raw.githubusercontent.com/torr9522/Linux-NetSpeed/tcpx.sh/selfhost/bbr.sh)
 }
 
 #切换到一键DD安装系统脚本 新手勿入
@@ -1308,14 +1319,14 @@ gotodd() {
 	clear
 	echo DD使用git.beta.gs的脚本，知悉
 	sleep 1.5
-	bash <(wget -qO- https://github.com/fcurrk/reinstall/raw/master/NewReinstall.sh)
+	bash <(wget -qO- https://raw.githubusercontent.com/torr9522/Linux-NetSpeed/tcpx.sh/selfhost/NewReinstall.sh)
 }
 
 #切换到检查当前IP质量/媒体解锁/邮箱通信脚本
 gotoipcheck() {
 	clear
 	sleep 1.5
-	bash <(wget -qO- https://raw.githubusercontent.com/xykt/IPQuality/main/ip.sh)
+	bash <(wget -qO- https://raw.githubusercontent.com/torr9522/Linux-NetSpeed/tcpx.sh/selfhost/ip.sh)
 	#bash <(wget -qO- https://IP.Check.Place)
 }
 
