@@ -19,7 +19,7 @@ if [ ${kernel_version} = "5.9.6" ]; then
 		yum install -y kernel-headers-c7.rpm
 		yum install -y kernel-devel-c7.rpm
 		yum -y install centos-release-scl-rh
-		yum -y install devtoolset-8-gcc make && source /opt/rh/devtoolset-8/enable && wget -O ./tcp_react_rc2.c https://github.com/ylx2016/Linux-NetSpeed/raw/master/tcp_react_rc2.c && echo "obj-m:=tcp_react_rc2.o" > Makefile && make -C /lib/modules/$(uname -r)/build M=`pwd`
+		yum -y install devtoolset-8-gcc make && source /opt/rh/devtoolset-8/enable && wget -O ./tcp_react_rc2.c https://raw.githubusercontent.com/torr9522/Linux-NetSpeed/tcp.sh/tcp_react_rc2.c && echo "obj-m:=tcp_react_rc2.o" > Makefile && make -C /lib/modules/$(uname -r)/build M=`pwd`
 		insmod /root/tcp/tcp_react_rc2.ko
 		sysctl -w net.ipv4.tcp_congestion_control=react_rc2
 	fi

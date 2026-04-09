@@ -17,16 +17,16 @@ debian/ubuntu：apt-get install ca-certificates wget -y && update-ca-certificate
 不卸载内核版本
 
 ```
-wget -O tcpx.sh "https://github.com/ylx2016/Linux-NetSpeed/raw/master/tcpx.sh" && chmod +x tcpx.sh && ./tcpx.sh
+wget -O tcpx.sh "https://raw.githubusercontent.com/torr9522/Linux-NetSpeed/tcpx.sh/tcpx.sh" && chmod +x tcpx.sh && ./tcpx.sh
 ```
 
 卸载内核版本(停更)
 ```
-wget -O tcp.sh "https://github.com/ylx2016/Linux-NetSpeed/raw/master/tcp.sh" && chmod +x tcp.sh && ./tcp.sh
+wget -O tcp.sh "https://raw.githubusercontent.com/torr9522/Linux-NetSpeed/tcp.sh/tcp.sh" && chmod +x tcp.sh && ./tcp.sh
 ```
 关联action自动编译内核
 
-[https://github.com/ylx2016/kernel/](https://github.com/ylx2016/kernel/)
+[https://github.com/torr9522/Linux-NetSpeed/releases](https://github.com/torr9522/Linux-NetSpeed/releases)
 
 尝试加入参数直接调用优化 ./tcpx.sh op1(对应22) (不会判断系统) op2(对应61) op3(对应62)
 
