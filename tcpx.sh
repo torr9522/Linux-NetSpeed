@@ -478,13 +478,24 @@ check_cn() {
 
 #下载
 download_file() {
-	url="$1"
-	filename="$2"
+	local url="$1"
+	local filename="$2"
+	local status=1
+	local i
 
-	wget "$url" -O "$filename"
-	status=$?
+	for i in 1 2 3; do
+		wget --tries=3 --timeout=20 --no-verbose "$url" -O "$filename"
+		status=$?
+		[[ $status -eq 0 ]] && break
+		sleep 2
+	done
 
-	if [ $status -eq 0 ]; then
+	if [[ $status -ne 0 ]] && command -v curl >/dev/null 2>&1; then
+		curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 600 "$url" -o "$filename"
+		status=$?
+	fi
+
+	if [[ $status -eq 0 ]]; then
 		echo -e "\e[32m文件下载成功或已经是最新。\e[0m"
 	else
 		echo -e "\e[31m文件下载失败，退出状态码: $status\e[0m"
@@ -565,14 +576,17 @@ installbbr() {
 		if [[ ${bit} == "x86_64" ]]; then
 			echo -e "如果下载地址出错，可能当前正在更新，超过半天还是出错请反馈，大陆自行解决污染问题"
 			github_tag=$(curl -s 'https://api.github.com/repos/torr9522/Linux-NetSpeed/releases' | grep 'Debian_Kernel' | grep '_latest_bbr_' | head -n 1 | awk -F '"' '{print $4}' | awk -F '[/]' '{print $8}')
-			github_ver=$(curl -s 'https://api.github.com/repos/torr9522/Linux-NetSpeed/releases' | grep "${github_tag}" | grep 'deb' | grep 'headers' | awk -F '"' '{print $4}' | awk -F '[/]' '{print $9}' | awk -F '[-]' '{print $3}' | awk -F '[_]' '{print $1}')
+			release_api="https://api.github.com/repos/torr9522/Linux-NetSpeed/releases/tags/${github_tag}"
+			github_ver=$(curl -fsSL "$release_api" | awk -F '"' '/browser_download_url/ && /linux-headers/ && /amd64\.deb/ {print $4; exit}' | awk -F '[/]' '{print $9}' | awk -F '[-]' '{print $3}' | awk -F '[_]' '{print $1}')
 			check_empty "$github_ver"
 			echo -e "获取的版本号为:${Green_font_prefix}${github_ver}${Font_color_suffix}"
 			kernel_version=$github_ver
 			detele_kernel_head
-			headurl=$(curl -s 'https://api.github.com/repos/torr9522/Linux-NetSpeed/releases' | grep "${github_tag}" | grep 'deb' | grep 'headers' | awk -F '"' '{print $4}')
-			imgurl=$(curl -s 'https://api.github.com/repos/torr9522/Linux-NetSpeed/releases' | grep "${github_tag}" | grep 'deb' | grep 'image' | grep -v 'headers' | grep -v 'devel' | head -n 1 | awk -F '"' '{print $4}')
+			headurl=$(curl -fsSL "$release_api" | awk -F '"' '/browser_download_url/ && /linux-headers/ && /amd64\.deb/ {print $4; exit}')
+			imgurl=$(curl -fsSL "$release_api" | awk -F '"' '/browser_download_url/ && /linux-image/ && /amd64\.deb/ {print $4; exit}')
 
+			check_empty "$headurl"
+			check_empty "$imgurl"
 			headurl=$(check_cn "$headurl")
 			imgurl=$(check_cn "$imgurl")
 
@@ -583,13 +597,15 @@ installbbr() {
 		elif [[ ${bit} == "aarch64" ]]; then
 			echo -e "如果下载地址出错，可能当前正在更新，超过半天还是出错请反馈，大陆自行解决污染问题"
 			github_tag=$(curl -s 'https://api.github.com/repos/torr9522/Linux-NetSpeed/releases' | grep 'Debian_Kernel' | grep '_arm64_' | grep '_bbr_' | head -n 1 | awk -F '"' '{print $4}' | awk -F '[/]' '{print $8}')
-			github_ver=$(curl -s 'https://api.github.com/repos/torr9522/Linux-NetSpeed/releases' | grep "${github_tag}" | grep 'deb' | grep 'headers' | awk -F '"' '{print $4}' | awk -F '[/]' '{print $9}' | awk -F '[-]' '{print $3}' | awk -F '[_]' '{print $1}')
+			release_api="https://api.github.com/repos/torr9522/Linux-NetSpeed/releases/tags/${github_tag}"
+			github_ver=$(curl -fsSL "$release_api" | awk -F '"' '/browser_download_url/ && /linux-headers/ && /arm64\.deb/ {print $4; exit}' | awk -F '[/]' '{print $9}' | awk -F '[-]' '{print $3}' | awk -F '[_]' '{print $1}')
 			echo -e "获取的版本号为:${Green_font_prefix}${github_ver}${Font_color_suffix}"
 			kernel_version=$github_ver
 			detele_kernel_head
-			headurl=$(curl -s 'https://api.github.com/repos/torr9522/Linux-NetSpeed/releases' | grep "${github_tag}" | grep 'deb' | grep 'headers' | awk -F '"' '{print $4}')
-			imgurl=$(curl -s 'https://api.github.com/repos/torr9522/Linux-NetSpeed/releases' | grep "${github_tag}" | grep 'deb' | grep 'image' | grep -v 'headers' | grep -v 'devel' | head -n 1 | awk -F '"' '{print $4}')
+			headurl=$(curl -fsSL "$release_api" | awk -F '"' '/browser_download_url/ && /linux-headers/ && /arm64\.deb/ {print $4; exit}')
+			imgurl=$(curl -fsSL "$release_api" | awk -F '"' '/browser_download_url/ && /linux-image/ && /arm64\.deb/ {print $4; exit}')
 
+			check_empty "$headurl"
 			check_empty "$imgurl"
 			headurl=$(check_cn "$headurl")
 			imgurl=$(check_cn "$imgurl")
@@ -1103,27 +1119,27 @@ maxmode=\"1\"" >>/appex/etc/config
 startbbr2fq() {
 	remove_bbr_lotserver
 	echo "net.core.default_qdisc=fq" >>/etc/sysctl.d/99-sysctl.conf
-	echo "net.ipv4.tcp_congestion_control=bbr2" >>/etc/sysctl.d/99-sysctl.conf
+	echo "net.ipv4.tcp_congestion_control=bbr" >>/etc/sysctl.d/99-sysctl.conf
 	sysctl --system
-	echo -e "${Info}BBR2修改成功，重启生效！"
+	echo -e "${Info}BBR3修改成功，重启生效！"
 }
 
 #启用BBR2+FQ_PIE
 startbbr2fqpie() {
 	remove_bbr_lotserver
 	echo "net.core.default_qdisc=fq_pie" >>/etc/sysctl.d/99-sysctl.conf
-	echo "net.ipv4.tcp_congestion_control=bbr2" >>/etc/sysctl.d/99-sysctl.conf
+	echo "net.ipv4.tcp_congestion_control=bbr" >>/etc/sysctl.d/99-sysctl.conf
 	sysctl --system
-	echo -e "${Info}BBR2修改成功，重启生效！"
+	echo -e "${Info}BBR3修改成功，重启生效！"
 }
 
 #启用BBR2+CAKE
 startbbr2cake() {
 	remove_bbr_lotserver
 	echo "net.core.default_qdisc=cake" >>/etc/sysctl.d/99-sysctl.conf
-	echo "net.ipv4.tcp_congestion_control=bbr2" >>/etc/sysctl.d/99-sysctl.conf
+	echo "net.ipv4.tcp_congestion_control=bbr" >>/etc/sysctl.d/99-sysctl.conf
 	sysctl --system
-	echo -e "${Info}BBR2修改成功，重启生效！"
+	echo -e "${Info}BBR3修改成功，重启生效！"
 }
 
 #开启ecn
@@ -1372,24 +1388,13 @@ net.ipv6.conf.default.accept_ra = 2" >>/etc/sysctl.d/99-sysctl.conf
 start_menu() {
 	clear
 	echo && echo -e " TCP加速 一键安装管理脚本 ${Red_font_prefix}[v${sh_ver}] 不卸内核${Font_color_suffix} from blog.ylx.me 母鸡慎用
- ${Green_font_prefix}0.${Font_color_suffix} 升级脚本
- ${Green_font_prefix}9.${Font_color_suffix} 切换到卸载内核版本        ${Green_font_prefix}10.${Font_color_suffix} 切换到一键DD系统脚本
- ${Green_font_prefix}60.${Font_color_suffix} 切换到检查当前IP质量/媒体解锁/邮箱通信脚本
  ———————————————————————————— 内核安装 —————————————————————————————
- ${Green_font_prefix}1.${Font_color_suffix} 安装 BBR原版内核          ${Green_font_prefix}7.${Font_color_suffix} 安装 Zen官方版内核
- ${Green_font_prefix}2.${Font_color_suffix} 安装 BBRplus版内核        ${Green_font_prefix}5.${Font_color_suffix} 安装 BBRplus新版内核
- ${Green_font_prefix}3.${Font_color_suffix} 安装 Lotserver(锐速)内核  ${Green_font_prefix}8.${Font_color_suffix} 安装 官方cloud内核
- ${Green_font_prefix}30.${Font_color_suffix} 安装 官方稳定内核        ${Green_font_prefix}31.${Font_color_suffix} 安装 官方最新内核
- ${Green_font_prefix}32.${Font_color_suffix} 安装 XANMOD(main)        ${Green_font_prefix}33.${Font_color_suffix} 安装 XANMOD(LTS)
- ${Green_font_prefix}36.${Font_color_suffix} 安装 XANMOD(EDGE)        ${Green_font_prefix}37.${Font_color_suffix} 安装 XANMOD(RT)
+ ${Green_font_prefix}1.${Font_color_suffix} 安装 BBR原版内核          ${Green_font_prefix}2.${Font_color_suffix} XanMod Kernel (支持 BBR3)
  ———————————————————————————— 加速启用 —————————————————————————————
  ${Green_font_prefix}11.${Font_color_suffix} 使用BBR+FQ加速           ${Green_font_prefix}12.${Font_color_suffix} 使用BBR+FQ_PIE加速 
- ${Green_font_prefix}13.${Font_color_suffix} 使用BBR+CAKE加速         ${Green_font_prefix}14.${Font_color_suffix} 使用BBR2+FQ加速
- ${Green_font_prefix}15.${Font_color_suffix} 使用BBR2+FQ_PIE加速      ${Green_font_prefix}16.${Font_color_suffix} 使用BBR2+CAKE加速
- ${Green_font_prefix}19.${Font_color_suffix} 使用BBRplus+FQ版加速     ${Green_font_prefix}20.${Font_color_suffix} 使用Lotserver(锐速)加速
- ${Green_font_prefix}28.${Font_color_suffix} 编译安装brutal模块
+ ${Green_font_prefix}13.${Font_color_suffix} 使用BBR+CAKE加速         ${Green_font_prefix}14.${Font_color_suffix} 使用BBR3+FQ加速
+ ${Green_font_prefix}15.${Font_color_suffix} 使用BBR3+FQ_PIE加速      ${Green_font_prefix}16.${Font_color_suffix} 使用BBR3+CAKE加速
  ———————————————————————————— 系统配置 —————————————————————————————
- ${Green_font_prefix}17.${Font_color_suffix} 开启ECN                  ${Green_font_prefix}18.${Font_color_suffix} 关闭ECN
  ${Green_font_prefix}21.${Font_color_suffix} 系统配置优化旧           ${Green_font_prefix}22.${Font_color_suffix} 系统配置优化新
  ${Green_font_prefix}23.${Font_color_suffix} 禁用IPv6                 ${Green_font_prefix}24.${Font_color_suffix} 开启IPv6
  ${Green_font_prefix}61.${Font_color_suffix} 手动提交合并内核参数     ${Green_font_prefix}62.${Font_color_suffix} 手动编辑内核参数
@@ -1417,7 +1422,7 @@ start_menu() {
 		check_sys_bbr
 		;;
 	2)
-		check_sys_bbrplus
+		check_sys_official_xanmod_main
 		;;
 	3)
 		check_sys_Lotsever
@@ -2389,10 +2394,9 @@ check_sys_official_xanmod_main() {
 
 	if [[ "${OS_type}" == "Debian" ]]; then
 		apt update
-		apt-get install gnupg gnupg2 gnupg1 sudo -y
-		echo 'deb http://deb.xanmod.org releases main' | sudo tee /etc/apt/sources.list.d/xanmod-kernel.list
-		# --[ 已修改 ]-- 使用 gpg --dearmor 替换 apt-key
-		wget -qO - https://dl.xanmod.org/gpg.key | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/xanmod-kernel.gpg
+		apt-get install gnupg ca-certificates wget -y
+		wget -qO- https://dl.xanmod.org/archive.key | gpg --dearmor -o /usr/share/keyrings/xanmod-archive-keyring.gpg
+		echo 'deb [signed-by=/usr/share/keyrings/xanmod-archive-keyring.gpg] http://deb.xanmod.org releases main' >/etc/apt/sources.list.d/xanmod-kernel.list
 		if [[ "${cpu_level}" == "4" ]]; then
 			apt update && apt install linux-xanmod-x64v3 -y
 		elif [[ "${cpu_level}" == "3" ]]; then
@@ -2548,6 +2552,10 @@ check_status() {
 	kernel_version_full=$(uname -r)
 	net_congestion_control=$(cat /proc/sys/net/ipv4/tcp_congestion_control 2>/dev/null || echo "unknown")
 	net_qdisc=$(cat /proc/sys/net/core/default_qdisc 2>/dev/null || echo "unknown")
+	bbr_version=$(tr '\0' '\n' </lib/modules/"${kernel_version_full}"/modules.builtin.modinfo 2>/dev/null | awk -F= '/^tcp_bbr.version=/{print $2; exit}')
+	if [[ -z "$bbr_version" ]]; then
+		bbr_version=$(modinfo tcp_bbr 2>/dev/null | awk '/^version:/{print $2; exit}')
+	fi
 
 	# 检测操作系统类型
 	if [ -f /etc/redhat-release ]; then
@@ -2574,7 +2582,7 @@ check_status() {
 	if [[ "$kernel_status" == "BBR" ]]; then
 		case "$net_congestion_control" in
 		"bbr")
-			run_status="BBR启动成功"
+			[[ "$bbr_version" == "3" ]] && run_status="BBR3启动成功" || run_status="BBR启动成功"
 			;;
 		"bbr2")
 			run_status="BBR2启动成功"
@@ -2610,7 +2618,7 @@ check_status() {
 			run_status="BBRplus启动成功"
 			;;
 		"bbr")
-			run_status="BBR启动成功"
+			[[ "$bbr_version" == "3" ]] && run_status="BBR3启动成功" || run_status="BBR启动成功"
 			;;
 		*)
 			run_status="未安装加速模块"
