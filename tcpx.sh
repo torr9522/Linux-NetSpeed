@@ -40,6 +40,12 @@ if [ "$EUID" -ne 0 ]; then
 	exit
 fi
 
+# 脚本已经要求 root 运行，统一将内部 sudo 调用降级为直接执行，
+# 避免在未安装 sudo 的精简系统上报错。
+sudo() {
+	"$@"
+}
+
 #优化系统配置
 optimizing_system_old() {
 	if [ ! -f "/etc/sysctl.d/99-sysctl.conf" ]; then
@@ -84,7 +90,7 @@ net.ipv4.tcp_timestamps = 0
 net.ipv4.tcp_max_orphans = 32768
 # forward ipv4
 #net.ipv4.ip_forward = 1" >>/etc/sysctl.d/99-sysctl.conf
-	sysctl -p
+	sysctl --system
 	echo "*               soft    nofile           1000000
 *               hard    nofile          1000000" >/etc/security/limits.conf
 	echo "ulimit -SHn 1000000" >>/etc/profile
@@ -411,69 +417,56 @@ checkurl() {
 
 #cn处理github加速
 check_cn() {
-	# 检查是否安装了jq命令，如果没有安装则进行安装
-	if ! command -v jq >/dev/null 2>&1; then
-		if command -v yum >/dev/null 2>&1; then
-			sudo yum install epel-release -y
-			sudo yum install -y jq
-		elif command -v apt-get >/dev/null 2>&1; then
-			sudo apt-get update
-			sudo apt-get install -y jq
-		else
-			echo "无法安装jq命令。请手动安装jq后再试。"
-			exit 1
+	local original_url="$1"
+	local current_ip=""
+	local response=""
+	local country=""
+	local combined_url=""
+	local response_code=""
+	local suffixes=(
+		"https://gh.con.sh/"
+		"https://gh-proxy.com/"
+		"https://ghp.ci/"
+		"https://gh.m-l.cc/"
+		"https://down.npee.cn/?"
+		"https://mirror.ghproxy.com/"
+		"https://ghps.cc/"
+		"https://gh.api.99988866.xyz/"
+		"https://git.886.be/"
+		"https://hub.gitmirror.com/"
+		"https://pd.zwc365.com/"
+		"https://gh.ddlc.top/"
+		"https://slink.ltd/"
+		"https://github.moeyy.xyz/"
+		"https://ghproxy.crazypeace.workers.dev/"
+		"https://gh.h233.eu.org/"
+	)
+
+	# 获取当前IP和地区信息，失败时直接回退原始链接，不中断主流程。
+	current_ip=$(curl -fsSL --max-time 3 https://api.ipify.org 2>/dev/null || true)
+	if [[ -z "$current_ip" ]]; then
+		echo "$original_url"
+		return 0
+	fi
+
+	response=$(curl -fsSL --max-time 3 "http://ip-api.com/json/$current_ip" 2>/dev/null || true)
+	country=$(printf '%s' "$response" | sed -n 's/.*"countryCode"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
+	if [[ "$country" != "CN" ]]; then
+		echo "$original_url"
+		return 0
+	fi
+
+	for suffix in "${suffixes[@]}"; do
+		combined_url="${suffix}${original_url}"
+		response_code=$(curl --max-time 2 -sL -o /dev/null -w "%{http_code}" -I "$combined_url" 2>/dev/null || true)
+		if [[ "$response_code" =~ ^2[0-9]{2}$ ]]; then
+			echo "$combined_url"
+			return 0
 		fi
-	fi
+	done
 
-	# 获取当前IP地址，设置超时为3秒
-	current_ip=$(curl -s --max-time 3 https://api.ipify.org)
-
-	# 使用ip-api.com查询IP所在国家，设置超时为3秒
-	response=$(curl -s --max-time 3 "http://ip-api.com/json/$current_ip")
-
-	# 检查国家是否为中国
-	country=$(echo "$response" | jq -r '.countryCode')
-	if [[ "$country" == "CN" ]]; then
-		local suffixes=(
-			"https://gh.con.sh/"
-			"https://gh-proxy.com/"
-			"https://ghp.ci/"
-			"https://gh.m-l.cc/"
-			"https://down.npee.cn/?"
-			"https://mirror.ghproxy.com/"
-			"https://ghps.cc/"
-			"https://gh.api.99988866.xyz/"
-			"https://git.886.be/"
-			"https://hub.gitmirror.com/"
-			"https://pd.zwc365.com/"
-			"https://gh.ddlc.top/"
-			"https://slink.ltd/"
-			"https://github.moeyy.xyz/"
-			"https://ghproxy.crazypeace.workers.dev/"
-			"https://gh.h233.eu.org/"
-		)
-
-		# 循环遍历每个后缀并测试组合的链接
-		for suffix in "${suffixes[@]}"; do
-			# 组合后缀和原始链接
-			combined_url="$suffix$1"
-
-			# 使用 curl -I 获取头部信息，提取状态码
-			local response_code=$(curl --max-time 2 -sL -w "%{http_code}" -I "$combined_url" | head -n 1 | awk '{print $2}')
-
-			# 检查响应码是否表示成功 (2xx)
-			if [[ $response_code -ge 200 && $response_code -lt 300 ]]; then
-				echo "$combined_url"
-				return 0 # 返回可用链接，结束函数
-			fi
-		done
-
-	# 如果没有找到有效链接，返回原始链接
-	else
-		echo "$1"
-		return 1
-
-	fi
+	echo "$original_url"
+	return 0
 }
 
 #下载
@@ -572,18 +565,20 @@ installbbr() {
 			fi
 		fi
 
-	elif [[ "${OS_type}" == "Debian" ]]; then
-		if [[ ${bit} == "x86_64" ]]; then
-			echo -e "如果下载地址出错，可能当前正在更新，超过半天还是出错请反馈，大陆自行解决污染问题"
-			github_tag=$(curl -s 'https://api.github.com/repos/torr9522/Linux-NetSpeed/releases' | grep 'Debian_Kernel' | grep '_latest_bbr_' | head -n 1 | awk -F '"' '{print $4}' | awk -F '[/]' '{print $8}')
-			release_api="https://api.github.com/repos/torr9522/Linux-NetSpeed/releases/tags/${github_tag}"
-			github_ver=$(curl -fsSL "$release_api" | awk -F '"' '/browser_download_url/ && /linux-headers/ && /amd64\.deb/ {print $4; exit}' | awk -F '[/]' '{print $9}' | awk -F '[-]' '{print $3}' | awk -F '[_]' '{print $1}')
-			check_empty "$github_ver"
-			echo -e "获取的版本号为:${Green_font_prefix}${github_ver}${Font_color_suffix}"
-			kernel_version=$github_ver
-			detele_kernel_head
-			headurl=$(curl -fsSL "$release_api" | awk -F '"' '/browser_download_url/ && /linux-headers/ && /amd64\.deb/ {print $4; exit}')
-			imgurl=$(curl -fsSL "$release_api" | awk -F '"' '/browser_download_url/ && /linux-image/ && /amd64\.deb/ {print $4; exit}')
+		elif [[ "${OS_type}" == "Debian" ]]; then
+			if [[ ${bit} == "x86_64" ]]; then
+				echo -e "如果下载地址出错，可能当前正在更新，超过半天还是出错请反馈，大陆自行解决污染问题"
+				releases_json=$(curl -fsSL 'https://api.github.com/repos/torr9522/Linux-NetSpeed/releases' 2>/dev/null || true)
+				github_tag=$(printf '%s\n' "$releases_json" | grep 'Debian_Kernel' | grep '_latest_bbr_' | head -n 1 | awk -F '"' '{print $4}' | awk -F '[/]' '{print $8}')
+				release_api="https://api.github.com/repos/torr9522/Linux-NetSpeed/releases/tags/${github_tag}"
+				release_json=$(curl -fsSL "$release_api" 2>/dev/null || true)
+				github_ver=$(printf '%s\n' "$release_json" | awk -F '"' '/browser_download_url/ && /linux-headers/ && /amd64\.deb/ {print $4; exit}' | awk -F '[/]' '{print $9}' | awk -F '[-]' '{print $3}' | awk -F '[_]' '{print $1}')
+				check_empty "$github_ver"
+				echo -e "获取的版本号为:${Green_font_prefix}${github_ver}${Font_color_suffix}"
+				kernel_version=$github_ver
+				detele_kernel_head
+				headurl=$(printf '%s\n' "$release_json" | awk -F '"' '/browser_download_url/ && /linux-headers/ && /amd64\.deb/ {print $4; exit}')
+				imgurl=$(printf '%s\n' "$release_json" | awk -F '"' '/browser_download_url/ && /linux-image/ && /amd64\.deb/ {print $4; exit}')
 
 			check_empty "$headurl"
 			check_empty "$imgurl"
@@ -594,16 +589,18 @@ installbbr() {
 			download_file "$imgurl" linux-image-d10.deb
 			dpkg -i linux-image-d10.deb
 			dpkg -i linux-headers-d10.deb
-		elif [[ ${bit} == "aarch64" ]]; then
-			echo -e "如果下载地址出错，可能当前正在更新，超过半天还是出错请反馈，大陆自行解决污染问题"
-			github_tag=$(curl -s 'https://api.github.com/repos/torr9522/Linux-NetSpeed/releases' | grep 'Debian_Kernel' | grep '_arm64_' | grep '_bbr_' | head -n 1 | awk -F '"' '{print $4}' | awk -F '[/]' '{print $8}')
-			release_api="https://api.github.com/repos/torr9522/Linux-NetSpeed/releases/tags/${github_tag}"
-			github_ver=$(curl -fsSL "$release_api" | awk -F '"' '/browser_download_url/ && /linux-headers/ && /arm64\.deb/ {print $4; exit}' | awk -F '[/]' '{print $9}' | awk -F '[-]' '{print $3}' | awk -F '[_]' '{print $1}')
-			echo -e "获取的版本号为:${Green_font_prefix}${github_ver}${Font_color_suffix}"
-			kernel_version=$github_ver
-			detele_kernel_head
-			headurl=$(curl -fsSL "$release_api" | awk -F '"' '/browser_download_url/ && /linux-headers/ && /arm64\.deb/ {print $4; exit}')
-			imgurl=$(curl -fsSL "$release_api" | awk -F '"' '/browser_download_url/ && /linux-image/ && /arm64\.deb/ {print $4; exit}')
+			elif [[ ${bit} == "aarch64" ]]; then
+				echo -e "如果下载地址出错，可能当前正在更新，超过半天还是出错请反馈，大陆自行解决污染问题"
+				releases_json=$(curl -fsSL 'https://api.github.com/repos/torr9522/Linux-NetSpeed/releases' 2>/dev/null || true)
+				github_tag=$(printf '%s\n' "$releases_json" | grep 'Debian_Kernel' | grep '_arm64_' | grep '_bbr_' | head -n 1 | awk -F '"' '{print $4}' | awk -F '[/]' '{print $8}')
+				release_api="https://api.github.com/repos/torr9522/Linux-NetSpeed/releases/tags/${github_tag}"
+				release_json=$(curl -fsSL "$release_api" 2>/dev/null || true)
+				github_ver=$(printf '%s\n' "$release_json" | awk -F '"' '/browser_download_url/ && /linux-headers/ && /arm64\.deb/ {print $4; exit}' | awk -F '[/]' '{print $9}' | awk -F '[-]' '{print $3}' | awk -F '[_]' '{print $1}')
+				echo -e "获取的版本号为:${Green_font_prefix}${github_ver}${Font_color_suffix}"
+				kernel_version=$github_ver
+				detele_kernel_head
+				headurl=$(printf '%s\n' "$release_json" | awk -F '"' '/browser_download_url/ && /linux-headers/ && /arm64\.deb/ {print $4; exit}')
+				imgurl=$(printf '%s\n' "$release_json" | awk -F '"' '/browser_download_url/ && /linux-image/ && /arm64\.deb/ {print $4; exit}')
 
 			check_empty "$headurl"
 			check_empty "$imgurl"
@@ -2665,6 +2662,6 @@ check_status() {
 #############系统检测组件#############
 check_sys
 check_version
-[[ "${OS_type}" == "Debian" ]] && [[ "${OS_type}" == "CentOS" ]] && echo -e "${Error} 本脚本不支持当前系统 ${release} !" && exit 1
+[[ "${OS_type}" != "Debian" && "${OS_type}" != "CentOS" ]] && echo -e "${Error} 本脚本不支持当前系统 ${release} !" && exit 1
 #check_github
 start_menu
