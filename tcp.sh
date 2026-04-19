@@ -1658,26 +1658,16 @@ start_menu() {
   echo && echo -e " TCP加速 一键安装管理脚本 ${Red_font_prefix}[v${sh_ver}] 默认卸载旧内核，并切换启动项${Font_color_suffix} from blog.ylx.me 母鸡慎用
  ———————————————————————————— 内核安装 —————————————————————————————
  ${Green_font_prefix}1.${Font_color_suffix} 安装 BBR原版内核          ${Green_font_prefix}2.${Font_color_suffix} XanMod Kernel (支持 BBR3)
- ${Green_font_prefix}3.${Font_color_suffix} 安装 Lotserver内核        ${Green_font_prefix}5.${Font_color_suffix} 安装 BBRplus 6.x 内核
- ${Green_font_prefix}8.${Font_color_suffix} 安装 Cloud 内核
  ———————————————————————————— 加速启用 —————————————————————————————
  ${Green_font_prefix}11.${Font_color_suffix} 使用BBR+FQ加速           ${Green_font_prefix}12.${Font_color_suffix} 使用BBR+FQ_PIE加速
  ${Green_font_prefix}13.${Font_color_suffix} 使用BBR+CAKE加速         ${Green_font_prefix}14.${Font_color_suffix} 使用BBR3+FQ加速
  ${Green_font_prefix}15.${Font_color_suffix} 使用BBR3+FQ_PIE加速      ${Green_font_prefix}16.${Font_color_suffix} 使用BBR3+CAKE加速
- ${Green_font_prefix}19.${Font_color_suffix} 使用BBRplus加速          ${Green_font_prefix}20.${Font_color_suffix} 使用Lotserver加速
  ———————————————————————————— 系统配置 —————————————————————————————
  ${Green_font_prefix}21.${Font_color_suffix} 系统配置优化旧           ${Green_font_prefix}22.${Font_color_suffix} 系统配置优化新
  ${Green_font_prefix}23.${Font_color_suffix} 禁用IPv6                 ${Green_font_prefix}24.${Font_color_suffix} 开启IPv6
- ${Green_font_prefix}26.${Font_color_suffix} DDCC 优化                ${Green_font_prefix}27.${Font_color_suffix} 激进优化
- ———————————————————————————— 工具脚本 —————————————————————————————
- ${Green_font_prefix}0.${Font_color_suffix} 更新脚本                  ${Green_font_prefix}9.${Font_color_suffix} 切换到脚本1 tcpx.sh
- ${Green_font_prefix}10.${Font_color_suffix} DD重装系统               ${Green_font_prefix}60.${Font_color_suffix} IP 质量检测
  ———————————————————————————— 内核管理 —————————————————————————————
  ${Green_font_prefix}25.${Font_color_suffix} 卸载全部加速             ${Green_font_prefix}99.${Font_color_suffix} 退出脚本
- —————————————————————————— 当前模式说明 ————————————————————————————
- 当前模式: 自动卸载旧内核 / 旧 headers，并切换默认启动项
- 若需手动保留多内核，请勿使用本脚本2进行安装切换
-————————————————————————————————————————————————————————————————" &&
+ ————————————————————————————————————————————————" &&
     check_status
   get_system_info
   echo -e " 信息： ${Font_color_suffix}$opsy ${Green_font_prefix}$virtual${Font_color_suffix} $arch ${Green_font_prefix}$kern${Font_color_suffix} "
@@ -1765,9 +1755,6 @@ start_menu() {
     ;;
   26)
     optimizing_ddcc
-    ;;
-  27)
-    optimizing_system_radicalizate
     ;;
   99)
     exit 1
