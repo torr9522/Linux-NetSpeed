@@ -1086,6 +1086,7 @@ installxanmod() {
       headurl=$(check_cn $headurl)
       imgurl=$(check_cn $imgurl)
 
+      kernel_version="5.15.95-xanmod1"
       download_file $headurl linux-headers-d10.deb
       download_file $imgurl linux-image-d10.deb
       dpkg -i linux-image-d10.deb
@@ -1665,7 +1666,9 @@ start_menu() {
  ———————————————————————————— 系统配置 —————————————————————————————
  ${Green_font_prefix}21.${Font_color_suffix} 系统配置优化旧           ${Green_font_prefix}22.${Font_color_suffix} 系统配置优化新
  ${Green_font_prefix}23.${Font_color_suffix} 禁用IPv6                 ${Green_font_prefix}24.${Font_color_suffix} 开启IPv6
+ ${Green_font_prefix}61.${Font_color_suffix} 手动提交合并内核参数     ${Green_font_prefix}62.${Font_color_suffix} 手动编辑内核参数
  ———————————————————————————— 内核管理 —————————————————————————————
+ ${Green_font_prefix}51.${Font_color_suffix} 查看排序内核             ${Green_font_prefix}52.${Font_color_suffix} 删除保留指定内核
  ${Green_font_prefix}25.${Font_color_suffix} 卸载全部加速             ${Green_font_prefix}99.${Font_color_suffix} 退出脚本
  ————————————————————————————————————————————————" &&
     check_status
@@ -1739,7 +1742,7 @@ start_menu() {
     startlotserver
     ;;
   21)
-    optimizing_system
+    optimizing_system_old
     ;;
   22)
     optimizing_system_johnrosen1
@@ -1755,6 +1758,18 @@ start_menu() {
     ;;
   26)
     optimizing_ddcc
+    ;;
+  51)
+    BBR_grub
+    ;;
+  52)
+    detele_kernel_custom
+    ;;
+  61)
+    update_sysctl_interactive
+    ;;
+  62)
+    edit_sysctl_interactive
     ;;
   99)
     exit 1
@@ -1844,6 +1859,221 @@ detele_kernel_head() {
   fi
 }
 
+detele_kernel_custom() {
+  BBR_grub
+  read -p " 查看上面内核输入需保留保留保留的内核关键词(如:5.15.0-11) :" kernel_version
+  detele_kernel
+  detele_kernel_head
+  BBR_grub
+}
+
+#-----------------------------------------------------------------------
+# 函数: update_sysctl_interactive
+# 功能: 以交互方式安全地更新 sysctl 配置文件并应用。
+#-----------------------------------------------------------------------
+update_sysctl_interactive() {
+  local LC_ALL=C
+  local CONF_FILE="/etc/sysctl.d/99-sysctl.conf"
+  local TMP_FILE
+  local BACKUP_FILE
+  local ignore_apply_error=true
+
+  log_info() {
+    echo "[INFO] $1"
+  }
+
+  log_error() {
+    echo "[ERROR] $1" >&2
+  }
+
+  log_warn() {
+    echo "[WARN] $1" >&2
+  }
+
+  if [[ $EUID -ne 0 ]]; then
+    log_error "此函数必须以 root 权限运行，请使用 sudo。"
+    return 1
+  fi
+
+  log_info "请输入或粘贴您要设置的 sysctl 参数 (格式: key = value)。"
+  log_info "可参考TCP迷之调参，https://omnitt.com/"
+  log_info "注释行(以 # 或 ; 开头)和空行将被忽略。"
+  log_info "最后一行请以空行结束 可手动回车加一行空行"
+  log_info "输入完成后，请按 Ctrl+D 结束输入。"
+
+  readarray -t user_input
+
+  if [ ${#user_input[@]} -eq 0 ]; then
+    log_info "没有接收到任何输入，操作已取消。"
+    return 0
+  fi
+
+  touch "$CONF_FILE"
+
+  TMP_FILE=$(mktemp) || {
+    log_error "无法创建临时文件"
+    return 1
+  }
+  trap 'rm -f "$TMP_FILE"' RETURN
+
+  cp "$CONF_FILE" "$TMP_FILE"
+
+  local -A params_to_add
+  local all_params_valid=true
+
+  log_info "正在校验所有输入参数..."
+  for line in "${user_input[@]}"; do
+    trimmed_line=$(echo "$line" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+
+    if [[ -z "$trimmed_line" ]] || [[ "$trimmed_line" =~ ^[[:space:]]*[#\;] ]]; then
+      continue
+    fi
+
+    if ! [[ "$trimmed_line" =~ ^[[:space:]]*([a-zA-Z0-9._-]+)[[:space:]]*=[[:space:]]*(.*)[[:space:]]*$ ]]; then
+      log_error "格式无效: '$trimmed_line'. 期望格式为 'key = value'."
+      all_params_valid=false
+      continue
+    fi
+
+    local key="${BASH_REMATCH[1]}"
+    local value="${BASH_REMATCH[2]}"
+
+    if ! sysctl -N "$key" >/dev/null 2>&1; then
+      log_error "参数键名无效: '$key' 不是一个有效的内核参数。"
+      all_params_valid=false
+      continue
+    fi
+
+    local formatted_param="$key = $value"
+
+    if grep -q -E "^[[:space:]]*${key//./\\.}([[:space:]]*)=.*" "$TMP_FILE"; then
+      sed -i -E "s|^[[:space:]]*${key//./\\.}([[:space:]]*)=.*|$formatted_param|" "$TMP_FILE"
+      log_info "已更新参数: $formatted_param"
+    else
+      if [[ -z "${params_to_add[$key]}" ]]; then
+        params_to_add["$key"]="$formatted_param"
+      fi
+    fi
+  done
+
+  if ! $all_params_valid; then
+    log_error "检测到无效参数，操作已中止。配置文件未做任何更改。"
+    return 1
+  fi
+
+  if [ ${#params_to_add[@]} -gt 0 ]; then
+    log_info "正在添加新参数..."
+    echo "" >>"$TMP_FILE"
+    for key in "${!params_to_add[@]}"; do
+      echo "${params_to_add[$key]}" >>"$TMP_FILE"
+      log_info "已添加新参数: ${params_to_add[$key]}"
+    done
+  fi
+
+  BACKUP_FILE="${CONF_FILE}.bak_$(date +%Y%m%d_%H%M%S)"
+  cp "$CONF_FILE" "$BACKUP_FILE"
+  log_info "原始文件已备份到 $BACKUP_FILE"
+
+  mv "$TMP_FILE" "$CONF_FILE"
+  chown root:root "$CONF_FILE"
+  chmod 644 "$CONF_FILE"
+  trap - RETURN
+
+  log_info "正在应用新的 sysctl 设置..."
+  if apply_output=$(sysctl -p "$CONF_FILE" 2>&1); then
+    log_info "Sysctl 设置已成功应用。"
+    echo "--- 应用输出 ---"
+    echo "$apply_output"
+    echo "------------------"
+    rm -f "$BACKUP_FILE"
+  else
+    if [[ "$ignore_apply_error" == "true" ]]; then
+      log_warn "应用 sysctl 设置失败，但根据指令已忽略错误。"
+      log_warn "配置文件 '${CONF_FILE}' 已被更新，但部分设置可能未生效。"
+      log_warn "--- 错误详情 ---"
+      echo "$apply_output" >&2
+      echo "------------------"
+      rm -f "$BACKUP_FILE"
+      return 0
+    else
+      log_error "应用 sysctl 设置失败！正在回滚..."
+      log_error "--- 错误详情 ---"
+      echo "$apply_output"
+      echo "------------------"
+
+      mv "$BACKUP_FILE" "$CONF_FILE"
+      log_info "正在恢复到之前的设置..."
+      sysctl -p "$CONF_FILE" >/dev/null 2>&1
+
+      log_error "回滚完成。配置文件已恢复，问题备份文件保留在 $BACKUP_FILE"
+      return 1
+    fi
+  fi
+
+  return 0
+}
+
+edit_sysctl_interactive() {
+  local target_file="/etc/sysctl.d/99-sysctl.conf"
+  local editor_cmd=""
+
+  if [ ! -f "$target_file" ]; then
+    echo "文件 $target_file 不存在。"
+    read -r -p "您想现在创建并编辑它吗？ (Y/n): " create_choice
+
+    case "$create_choice" in
+      [nN])
+        echo "操作已取消。"
+        return 0
+        ;;
+      *)
+        echo "好的，准备创建并打开编辑器..."
+        ;;
+    esac
+  fi
+
+  if command -v nano >/dev/null; then
+    editor_cmd="nano"
+  else
+    echo "首选编辑器 'nano' 未安装。"
+    read -r -p "您想现在安装 'nano' 吗？ (Y/n): " install_choice
+
+    case "$install_choice" in
+      [nN])
+        echo "好的，将使用 'vi' 编辑器。"
+        echo "提示：'vi' 启动后，按 'i' 键进入插入模式，'Esc' 键退出插入模式，"
+        echo "   然后输入 ':wq' 保存并退出，或 ':q!' 不保存退出。"
+        editor_cmd="vi"
+        ;;
+      *)
+        echo "请在您的终端中运行:"
+        echo "  sudo apt install nano  (适用于 Debian/Ubuntu)"
+        echo "  sudo dnf install nano  (适用于 Fedora/RHEL 8+)"
+        echo "  sudo yum install nano  (适用于 CentOS 7)"
+        echo "安装完成后，请重新运行此函数。"
+        echo "操作已取消。"
+        return 1
+        ;;
+    esac
+  fi
+
+  echo "正在使用 $editor_cmd 打开 $target_file..."
+  echo "请注意：编辑系统文件需要管理员权限，您可能需要输入密码。"
+
+  if ! sudo "$editor_cmd" "$target_file"; then
+    echo "编辑器 '$editor_cmd' 启动失败或异常退出。"
+    echo "请检查您的 sudo 权限或编辑器是否正确安装。"
+    return 1
+  fi
+
+  echo ""
+  echo "编辑完成。"
+  echo "正在应用 $target_file 中的设置..."
+
+  sudo sysctl -p "$target_file"
+  echo "已执行应用，部分可能需要重启生效"
+}
+
 #更新引导
 BBR_grub() {
   if [[ "${OS_type}" == "CentOS" ]]; then
@@ -1902,8 +2132,61 @@ BBR_grub() {
       apt install grub2-common -y
       update-grub
     fi
-    #exit 1
+    set_debian_grub_default_kernel
   fi
+}
+
+set_debian_grub_default_kernel() {
+  local grub_cfg="/boot/grub/grub.cfg"
+  local grub_default_file="/etc/default/grub"
+  local advanced_title=""
+  local entry_title=""
+  local default_path=""
+  local tmp_file=""
+
+  [[ -n "${kernel_version:-}" ]] || return 0
+  [[ -f "${grub_cfg}" ]] || return 0
+
+  advanced_title=$(awk -F"'" '/^submenu / {print $2; exit}' "${grub_cfg}")
+  entry_title=$(awk -F"'" -v kv="${kernel_version}" '$0 ~ /^[[:space:]]*menuentry / && $2 ~ ("Linux " kv "($|[[:space:](])") {print $2; exit}' "${grub_cfg}")
+
+  if [[ -z "${entry_title}" ]]; then
+    echo -e "${Error} 未在 grub.cfg 中找到目标内核 ${kernel_version} 的菜单项，请检查."
+    return 1
+  fi
+
+  if [[ -n "${advanced_title}" ]]; then
+    default_path="${advanced_title}>${entry_title}"
+  else
+    default_path="${entry_title}"
+  fi
+
+  tmp_file="$(mktemp)"
+  awk -v val="GRUB_DEFAULT=\"${default_path}\"" '
+    BEGIN { updated = 0 }
+    /^GRUB_DEFAULT=/ {
+      if (!updated) {
+        print val
+        updated = 1
+      }
+      next
+    }
+    { print }
+    END {
+      if (!updated) {
+        print val
+      }
+    }
+  ' "${grub_default_file}" >"${tmp_file}" && cat "${tmp_file}" >"${grub_default_file}"
+  rm -f "${tmp_file}"
+
+  if _exists "update-grub"; then
+    update-grub
+  elif [ -f "/usr/sbin/update-grub" ]; then
+    /usr/sbin/update-grub
+  fi
+
+  echo -e "${Info} 已设置 Debian 默认启动内核为: ${kernel_version}"
 }
 
 #简单的检查内核
@@ -2222,15 +2505,19 @@ check_sys_official_xanmod_main() {
   if [[ "${OS_type}" == "Debian" ]]; then
     apt update
     apt-get install gnupg ca-certificates wget -y
-    wget -qO- https://dl.xanmod.org/archive.key | gpg --dearmor -o /usr/share/keyrings/xanmod-archive-keyring.gpg
+    wget -qO- https://dl.xanmod.org/archive.key | gpg --batch --yes --dearmor -o /usr/share/keyrings/xanmod-archive-keyring.gpg
     echo 'deb [signed-by=/usr/share/keyrings/xanmod-archive-keyring.gpg] http://deb.xanmod.org releases main' >/etc/apt/sources.list.d/xanmod-kernel.list
     if [[ "${cpu_level}" == "4" || "${cpu_level}" == "3" ]]; then
       apt update && apt install linux-xanmod-x64v3 -y
+      kernel_version=$(apt-cache show linux-xanmod-x64v3 2>/dev/null | awk -F'[:, ]+' '/^Depends: / {for (i = 1; i <= NF; i++) if ($i ~ /^linux-image-/) {sub(/^linux-image-/, "", $i); print $i; exit}}')
     elif [[ "${cpu_level}" == "2" ]]; then
       apt update && apt install linux-xanmod-x64v2 -y
+      kernel_version=$(apt-cache show linux-xanmod-x64v2 2>/dev/null | awk -F'[:, ]+' '/^Depends: / {for (i = 1; i <= NF; i++) if ($i ~ /^linux-image-/) {sub(/^linux-image-/, "", $i); print $i; exit}}')
     else
       apt update && apt install linux-xanmod-x64v1 -y
+      kernel_version=$(apt-cache show linux-xanmod-x64v1 2>/dev/null | awk -F'[:, ]+' '/^Depends: / {for (i = 1; i <= NF; i++) if ($i ~ /^linux-image-/) {sub(/^linux-image-/, "", $i); print $i; exit}}')
     fi
+    check_empty "$kernel_version"
   else
     echo -e "${Error} 不支持当前系统 ${release} ${version} ${bit} !" && exit 1
   fi
