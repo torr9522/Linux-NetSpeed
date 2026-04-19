@@ -18,6 +18,8 @@ export PATH
 
 sh_ver="100.0.4.15"
 github="raw.githubusercontent.com/torr9522/Linux-NetSpeed/tcpx.sh"
+AUTO_CLEAN_OLD_KERNELS="${TCPX_AUTO_CLEAN_OLD_KERNELS:-0}"
+FORCE_KERNEL_DELETE=0
 
 imgurl=""
 headurl=""
@@ -619,7 +621,7 @@ installbbr() {
 	cd .. && rm -rf bbr
 
 	BBR_grub
-	echo -e "${Tip} 内核安装完毕，请参考上面的信息检查是否安装成功,默认从排第一的高版本内核启动"
+	echo -e "${Tip} 内核安装完毕，当前默认模式为保留旧内核，仅切换默认启动项，请参考上面的信息检查是否安装成功"
 	check_kernel
 }
 
@@ -671,7 +673,7 @@ installbbrplus() {
 
 	cd .. && rm -rf bbrplus
 	BBR_grub
-	echo -e "${Tip} 内核安装完毕，请参考上面的信息检查是否安装成功,默认从排第一的高版本内核启动"
+	echo -e "${Tip} 内核安装完毕，当前默认模式为保留旧内核，仅切换默认启动项，请参考上面的信息检查是否安装成功"
 	check_kernel
 }
 
@@ -776,7 +778,7 @@ installlot() {
 	fi
 
 	BBR_grub
-	echo -e "${Tip} 内核安装完毕，请参考上面的信息检查是否安装成功,默认从排第一的高版本内核启动"
+	echo -e "${Tip} 内核安装完毕，当前默认模式为保留旧内核，仅切换默认启动项，请参考上面的信息检查是否安装成功"
 	check_kernel
 }
 
@@ -847,7 +849,7 @@ installxanmod() {
 
 	#cd .. && rm -rf xanmod
 	BBR_grub
-	echo -e "${Tip} 内核安装完毕，请参考上面的信息检查是否安装成功,默认从排第一的高版本内核启动"
+	echo -e "${Tip} 内核安装完毕，当前默认模式为保留旧内核，仅切换默认启动项，请参考上面的信息检查是否安装成功"
 	check_kernel
 }
 
@@ -944,7 +946,7 @@ installbbrplusnew() {
 
 	cd .. && rm -rf bbrplusnew
 	BBR_grub
-	echo -e "${Tip} 内核安装完毕，请参考上面的信息检查是否安装成功,默认从排第一的高版本内核启动"
+	echo -e "${Tip} 内核安装完毕，当前默认模式为保留旧内核，仅切换默认启动项，请参考上面的信息检查是否安装成功"
 	check_kernel
 
 }
@@ -1053,7 +1055,7 @@ installcloud() {
 	rm -f "$IMAGE_DEB_FILE" "$VERSION_MAP_FILE"
 
 	BBR_grub
-	echo -e "${Tip} 内核安装完毕，请参考上面的信息检查是否安装成功,默认从排第一的高版本内核启动"
+	echo -e "${Tip} 内核安装完毕，当前默认模式为保留旧内核，仅切换默认启动项，请参考上面的信息检查是否安装成功"
 	check_kernel
 
 }
@@ -1384,7 +1386,7 @@ net.ipv6.conf.default.accept_ra = 2" >>/etc/sysctl.d/99-sysctl.conf
 #开始菜单
 start_menu() {
 	clear
-	echo && echo -e " TCP加速 一键安装管理脚本 ${Red_font_prefix}[v${sh_ver}] 不卸内核${Font_color_suffix} from blog.ylx.me 母鸡慎用
+	echo && echo -e " TCP加速 一键安装管理脚本 ${Red_font_prefix}[v${sh_ver}] 默认保留旧内核，仅切换启动项${Font_color_suffix} from blog.ylx.me 母鸡慎用
  ———————————————————————————— 内核安装 —————————————————————————————
  ${Green_font_prefix}1.${Font_color_suffix} 安装 BBR原版内核          ${Green_font_prefix}2.${Font_color_suffix} XanMod Kernel (支持 BBR3)
  ———————————————————————————— 加速启用 —————————————————————————————
@@ -1538,6 +1540,10 @@ start_menu() {
 
 #删除多余内核
 detele_kernel() {
+	if [[ "${FORCE_KERNEL_DELETE}" != "1" && "${AUTO_CLEAN_OLD_KERNELS}" != "1" ]]; then
+		echo -e "${Info} 已启用保留旧内核模式，跳过自动卸载 image 内核。"
+		return 0
+	fi
 	if [[ "${OS_type}" == "CentOS" ]]; then
 		rpm_total=$(rpm -qa | grep kernel | grep -v "${kernel_version}" | grep -v "noarch" | wc -l)
 		if [ "${rpm_total}" ] >"1"; then
@@ -1571,6 +1577,10 @@ detele_kernel() {
 }
 
 detele_kernel_head() {
+	if [[ "${FORCE_KERNEL_DELETE}" != "1" && "${AUTO_CLEAN_OLD_KERNELS}" != "1" ]]; then
+		echo -e "${Info} 已启用保留旧内核模式，跳过自动卸载 headers 内核。"
+		return 0
+	fi
 	if [[ "${OS_type}" == "CentOS" ]]; then
 		rpm_total=$(rpm -qa | grep kernel-headers | grep -v "${kernel_version}" | grep -v "noarch" | wc -l)
 		if [ "${rpm_total}" ] >"1"; then
@@ -1606,8 +1616,10 @@ detele_kernel_head() {
 detele_kernel_custom() {
 	BBR_grub
 	read -p " 查看上面内核输入需保留保留保留的内核关键词(如:5.15.0-11) :" kernel_version
+	FORCE_KERNEL_DELETE=1
 	detele_kernel
 	detele_kernel_head
+	FORCE_KERNEL_DELETE=0
 	BBR_grub
 }
 
@@ -1907,9 +1919,62 @@ BBR_grub() {
 			apt install grub2-common -y
 			update-grub
 		fi
-		#exit 1
+		set_debian_grub_default_kernel
 	fi
 	check_disk_space
+}
+
+set_debian_grub_default_kernel() {
+	local grub_cfg="/boot/grub/grub.cfg"
+	local grub_default_file="/etc/default/grub"
+	local advanced_title=""
+	local entry_title=""
+	local default_path=""
+	local tmp_file=""
+
+	[[ -n "${kernel_version:-}" ]] || return 0
+	[[ -f "${grub_cfg}" ]] || return 0
+
+	advanced_title=$(awk -F"'" '/^submenu / {print $2; exit}' "${grub_cfg}")
+	entry_title=$(awk -F"'" -v kv="${kernel_version}" '$0 ~ /^[[:space:]]*menuentry / && $2 ~ ("Linux " kv "($|[[:space:](])") {print $2; exit}' "${grub_cfg}")
+
+	if [[ -z "${entry_title}" ]]; then
+		echo -e "${Error} 未在 grub.cfg 中找到目标内核 ${kernel_version} 的菜单项，请检查."
+		return 1
+	fi
+
+	if [[ -n "${advanced_title}" ]]; then
+		default_path="${advanced_title}>${entry_title}"
+	else
+		default_path="${entry_title}"
+	fi
+
+	tmp_file="$(mktemp)"
+	awk -v val="GRUB_DEFAULT=\"${default_path}\"" '
+		BEGIN { updated = 0 }
+		/^GRUB_DEFAULT=/ {
+			if (!updated) {
+				print val
+				updated = 1
+			}
+			next
+		}
+		{ print }
+		END {
+			if (!updated) {
+				print val
+			}
+		}
+	' "${grub_default_file}" >"${tmp_file}" && cat "${tmp_file}" >"${grub_default_file}"
+	rm -f "${tmp_file}"
+
+	if _exists "update-grub"; then
+		update-grub
+	elif [ -f "/usr/sbin/update-grub" ]; then
+		/usr/sbin/update-grub
+	fi
+
+	echo -e "${Info} 已设置 Debian 默认启动内核为: ${kernel_version}"
 }
 
 #简单的检查内核
@@ -2307,7 +2372,7 @@ check_sys_official() {
 	fi
 
 	BBR_grub
-	echo -e "${Tip} 内核安装完毕，请参考上面的信息检查是否安装成功,默认从排第一的高版本内核启动"
+	echo -e "${Tip} 内核安装完毕，当前默认模式为保留旧内核，仅切换默认启动项，请参考上面的信息检查是否安装成功"
 }
 
 #检查官方最新内核并安装
@@ -2374,7 +2439,7 @@ check_sys_official_bbr() {
 	fi
 
 	BBR_grub
-	echo -e "${Tip} 内核安装完毕，请参考上面的信息检查是否安装成功,默认从排第一的高版本内核启动"
+	echo -e "${Tip} 内核安装完毕，当前默认模式为保留旧内核，仅切换默认启动项，请参考上面的信息检查是否安装成功"
 }
 
 #检查官方xanmod main内核并安装
@@ -2408,7 +2473,7 @@ check_sys_official_xanmod_main() {
 	fi
 
 	BBR_grub
-	echo -e "${Tip} 内核安装完毕，请参考上面的信息检查是否安装成功,默认从排第一的高版本内核启动"
+	echo -e "${Tip} 内核安装完毕，当前默认模式为保留旧内核，仅切换默认启动项，请参考上面的信息检查是否安装成功"
 }
 
 #检查官方xanmod lts内核并安装
@@ -2443,7 +2508,7 @@ check_sys_official_xanmod_lts() {
 	fi
 
 	BBR_grub
-	echo -e "${Tip} 内核安装完毕，请参考上面的信息检查是否安装成功,默认从排第一的高版本内核启动"
+	echo -e "${Tip} 内核安装完毕，当前默认模式为保留旧内核，仅切换默认启动项，请参考上面的信息检查是否安装成功"
 }
 
 #检查官方xanmod edge内核并安装
@@ -2478,7 +2543,7 @@ check_sys_official_xanmod_edge() {
 	fi
 
 	BBR_grub
-	echo -e "${Tip} 内核安装完毕，请参考上面的信息检查是否安装成功,默认从排第一的高版本内核启动"
+	echo -e "${Tip} 内核安装完毕，当前默认模式为保留旧内核，仅切换默认启动项，请参考上面的信息检查是否安装成功"
 }
 
 #检查官方xanmod rt内核并安装
@@ -2513,7 +2578,7 @@ check_sys_official_xanmod_rt() {
 	fi
 
 	BBR_grub
-	echo -e "${Tip} 内核安装完毕，请参考上面的信息检查是否安装成功,默认从排第一的高版本内核启动"
+	echo -e "${Tip} 内核安装完毕，当前默认模式为保留旧内核，仅切换默认启动项，请参考上面的信息检查是否安装成功"
 }
 
 #检查Zen官方内核并安装
@@ -2539,7 +2604,7 @@ check_sys_official_zen() {
 	fi
 
 	BBR_grub
-	echo -e "${Tip} 内核安装完毕，请参考上面的信息检查是否安装成功,默认从排第一的高版本内核启动"
+	echo -e "${Tip} 内核安装完毕，当前默认模式为保留旧内核，仅切换默认启动项，请参考上面的信息检查是否安装成功"
 }
 
 #检查系统当前状态
