@@ -18,6 +18,7 @@ export PATH
 sh_ver="100.0.4.2"
 github="raw.githubusercontent.com/torr9522/Linux-NetSpeed/tcp.sh"
 AUTO_CLEAN_OLD_KERNELS="${TCP_AUTO_CLEAN_OLD_KERNELS:-1}"
+FORCE_KERNEL_DELETE=0
 
 imgurl=""
 headurl=""
@@ -1583,11 +1584,30 @@ Update_Shell() {
   fi
 }
 
+run_local_or_remote_script() {
+  local remote_url="$1"
+  shift
+  local script_dir
+  local candidate
+  script_dir="$(cd -- "$(dirname -- "$(readlink -f "${BASH_SOURCE[0]}")")" >/dev/null 2>&1 && pwd -P)"
+
+  for candidate in "$@"; do
+    if [[ -f "${script_dir}/${candidate}" ]]; then
+      bash "${script_dir}/${candidate}"
+      return $?
+    fi
+  done
+
+  bash <(wget -qO- "$remote_url")
+}
+
 #切换到不卸载内核版本
 gototcpx() {
   clear
-  #wget -O tcpx.sh "https://github.com/ylx2016/Linux-NetSpeed/raw/master/tcpx.sh" && chmod +x tcpx.sh && ./tcpx.sh
-  bash <(wget -qO- https://raw.githubusercontent.com/torr9522/Linux-NetSpeed/tcpx.sh/tcpx.sh)
+  run_local_or_remote_script \
+    "https://raw.githubusercontent.com/torr9522/Linux-NetSpeed/tcpx.sh/tcpx.sh" \
+    "tcpx.sh" \
+    "../Linux-NetSpeed-tcpx/tcpx.sh"
 }
 
 #切换到秋水逸冰BBR安装脚本
@@ -1786,75 +1806,75 @@ start_menu() {
 
 #删除多余内核
 detele_kernel() {
-  if [[ "${AUTO_CLEAN_OLD_KERNELS}" != "1" ]]; then
+  if [[ "${FORCE_KERNEL_DELETE}" != "1" && "${AUTO_CLEAN_OLD_KERNELS}" != "1" ]]; then
     echo -e "${Info} 已禁用自动卸载旧 image 内核，跳过清理。"
     return 0
   fi
   if [[ "${OS_type}" == "CentOS" ]]; then
     rpm_total=$(rpm -qa | grep kernel | grep -v "${kernel_version}" | grep -v "noarch" | wc -l)
-    if [ "${rpm_total}" ] >"1"; then
+    if (( rpm_total > 0 )); then
       echo -e "检测到 ${rpm_total} 个其余内核，开始卸载..."
       for ((integer = 1; integer <= ${rpm_total}; integer++)); do
-        rpm_del=$(rpm -qa | grep kernel | grep -v "${kernel_version}" | grep -v "noarch" | head -${integer})
+        rpm_del=$(rpm -qa | grep kernel | grep -v "${kernel_version}" | grep -v "noarch" | sed -n "${integer}p")
         echo -e "开始卸载 ${rpm_del} 内核..."
-        rpm --nodeps -e ${rpm_del}
+        rpm --nodeps -e "${rpm_del}"
         echo -e "卸载 ${rpm_del} 内核卸载完成，继续..."
       done
       echo --nodeps -e "内核卸载完毕，继续..."
     else
-      echo -e " 检测到 内核 数量不正确，请检查 !" && exit 1
+      echo -e "${Info} 未检测到需要自动卸载的 image 内核。"
     fi
   elif [[ "${OS_type}" == "Debian" ]]; then
     deb_total=$(dpkg -l | grep linux-image | awk '{print $2}' | grep -v "${kernel_version}" | wc -l)
-    if [ "${deb_total}" ] >"1"; then
+    if (( deb_total > 0 )); then
       echo -e "检测到 ${deb_total} 个其余内核，开始卸载..."
       for ((integer = 1; integer <= ${deb_total}; integer++)); do
-        deb_del=$(dpkg -l | grep linux-image | awk '{print $2}' | grep -v "${kernel_version}" | head -${integer})
+        deb_del=$(dpkg -l | grep linux-image | awk '{print $2}' | grep -v "${kernel_version}" | sed -n "${integer}p")
         echo -e "开始卸载 ${deb_del} 内核..."
-        apt-get purge -y ${deb_del}
+        apt-get purge -y "${deb_del}"
         apt-get autoremove -y
         echo -e "卸载 ${deb_del} 内核卸载完成，继续..."
       done
       echo -e "内核卸载完毕，继续..."
     else
-      echo -e " 检测到 内核 数量不正确，请检查 !" && exit 1
+      echo -e "${Info} 未检测到需要自动卸载的 image 内核。"
     fi
   fi
 }
 
 detele_kernel_head() {
-  if [[ "${AUTO_CLEAN_OLD_KERNELS}" != "1" ]]; then
+  if [[ "${FORCE_KERNEL_DELETE}" != "1" && "${AUTO_CLEAN_OLD_KERNELS}" != "1" ]]; then
     echo -e "${Info} 已禁用自动卸载旧 headers 内核，跳过清理。"
     return 0
   fi
   if [[ "${OS_type}" == "CentOS" ]]; then
     rpm_total=$(rpm -qa | grep kernel-headers | grep -v "${kernel_version}" | grep -v "noarch" | wc -l)
-    if [ "${rpm_total}" ] >"1"; then
+    if (( rpm_total > 0 )); then
       echo -e "检测到 ${rpm_total} 个其余head内核，开始卸载..."
       for ((integer = 1; integer <= ${rpm_total}; integer++)); do
-        rpm_del=$(rpm -qa | grep kernel-headers | grep -v "${kernel_version}" | grep -v "noarch" | head -${integer})
+        rpm_del=$(rpm -qa | grep kernel-headers | grep -v "${kernel_version}" | grep -v "noarch" | sed -n "${integer}p")
         echo -e "开始卸载 ${rpm_del} headers内核..."
-        rpm --nodeps -e ${rpm_del}
+        rpm --nodeps -e "${rpm_del}"
         echo -e "卸载 ${rpm_del} 内核卸载完成，继续..."
       done
       echo --nodeps -e "内核卸载完毕，继续..."
     else
-      echo -e " 检测到 内核 数量不正确，请检查 !" && exit 1
+      echo -e "${Info} 未检测到需要自动卸载的 headers 内核。"
     fi
   elif [[ "${OS_type}" == "Debian" ]]; then
     deb_total=$(dpkg -l | grep linux-headers | awk '{print $2}' | grep -v "${kernel_version}" | wc -l)
-    if [ "${deb_total}" ] >"1"; then
+    if (( deb_total > 0 )); then
       echo -e "检测到 ${deb_total} 个其余head内核，开始卸载..."
       for ((integer = 1; integer <= ${deb_total}; integer++)); do
-        deb_del=$(dpkg -l | grep linux-headers | awk '{print $2}' | grep -v "${kernel_version}" | head -${integer})
+        deb_del=$(dpkg -l | grep linux-headers | awk '{print $2}' | grep -v "${kernel_version}" | sed -n "${integer}p")
         echo -e "开始卸载 ${deb_del} headers内核..."
-        apt-get purge -y ${deb_del}
+        apt-get purge -y "${deb_del}"
         apt-get autoremove -y
         echo -e "卸载 ${deb_del} 内核卸载完成，继续..."
       done
       echo -e "内核卸载完毕，继续..."
     else
-      echo -e " 检测到 内核 数量不正确，请检查 !" && exit 1
+      echo -e "${Info} 未检测到需要自动卸载的 headers 内核。"
     fi
   fi
 }
@@ -1862,8 +1882,10 @@ detele_kernel_head() {
 detele_kernel_custom() {
   BBR_grub
   read -p " 查看上面内核输入需保留保留保留的内核关键词(如:5.15.0-11) :" kernel_version
+  FORCE_KERNEL_DELETE=1
   detele_kernel
   detele_kernel_head
+  FORCE_KERNEL_DELETE=0
   BBR_grub
 }
 
@@ -2523,7 +2545,7 @@ check_sys_official_xanmod_main() {
   fi
 
   BBR_grub
-  echo -e "${Tip} 内核安装完毕，请参考上面的信息检查是否安装成功,默认从排第一的高版本内核启动"
+  echo -e "${Tip} 内核安装完毕，当前默认模式为卸载旧内核，并切换默认启动项，请参考上面的信息检查是否安装成功"
 }
 
 #检查安装Lotsever的系统要求
