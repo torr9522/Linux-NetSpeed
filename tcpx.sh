@@ -838,6 +838,7 @@ installxanmod() {
 			headurl=$(check_cn $headurl)
 			imgurl=$(check_cn $imgurl)
 
+			kernel_version="5.15.95-xanmod1"
 			download_file "$headurl" linux-headers-d10.deb
 			download_file "$imgurl" linux-image-d10.deb
 			dpkg -i linux-image-d10.deb
@@ -847,7 +848,7 @@ installxanmod() {
 		fi
 	fi
 
-	#cd .. && rm -rf xanmod
+	cd .. && rm -rf xanmod
 	BBR_grub
 	echo -e "${Tip} 内核安装完毕，当前默认模式为保留旧内核，仅切换默认启动项，请参考上面的信息检查是否安装成功"
 	check_kernel
@@ -1317,10 +1318,30 @@ Update_Shell() {
 	fi
 }
 
+run_local_or_remote_script() {
+	local remote_url="$1"
+	shift
+	local script_dir
+	local candidate
+	script_dir="$(cd -- "$(dirname -- "$(readlink -f "${BASH_SOURCE[0]}")")" >/dev/null 2>&1 && pwd -P)"
+
+	for candidate in "$@"; do
+		if [[ -f "${script_dir}/${candidate}" ]]; then
+			bash "${script_dir}/${candidate}"
+			return $?
+		fi
+	done
+
+	bash <(wget -qO- "$remote_url")
+}
+
 #切换到卸载内核版本
 gototcp() {
 	clear
-	bash <(wget -qO- https://raw.githubusercontent.com/torr9522/Linux-NetSpeed/tcp.sh/tcp.sh)
+	run_local_or_remote_script \
+		"https://raw.githubusercontent.com/torr9522/Linux-NetSpeed/tcp.sh/tcp.sh" \
+		"tcp.sh" \
+		"../Linux-NetSpeed-tcp/tcp.sh"
 }
 
 #切换到秋水逸冰BBR安装脚本
@@ -1546,24 +1567,24 @@ detele_kernel() {
 	fi
 	if [[ "${OS_type}" == "CentOS" ]]; then
 		rpm_total=$(rpm -qa | grep kernel | grep -v "${kernel_version}" | grep -v "noarch" | wc -l)
-		if [ "${rpm_total}" ] >"1"; then
+		if (( rpm_total > 0 )); then
 			echo -e "检测到 ${rpm_total} 个其余内核，开始卸载..."
 			for ((integer = 1; integer <= ${rpm_total}; integer++)); do
-				rpm_del=$(rpm -qa | grep kernel | grep -v "${kernel_version}" | grep -v "noarch" | head -${integer})
+				rpm_del=$(rpm -qa | grep kernel | grep -v "${kernel_version}" | grep -v "noarch" | sed -n "${integer}p")
 				echo -e "开始卸载 ${rpm_del} 内核..."
 				rpm --nodeps -e "${rpm_del}"
 				echo -e "卸载 ${rpm_del} 内核卸载完成，继续..."
 			done
 			echo --nodeps -e "内核卸载完毕，继续..."
 		else
-			echo -e " 检测到 内核 数量不正确，请检查 !" && exit 1
+			echo -e "${Info} 未检测到需要自动卸载的 image 内核。"
 		fi
 	elif [[ "${OS_type}" == "Debian" ]]; then
 		deb_total=$(dpkg -l | grep linux-image | awk '{print $2}' | grep -v "${kernel_version}" | wc -l)
-		if [ "${deb_total}" ] >"1"; then
+		if (( deb_total > 0 )); then
 			echo -e "检测到 ${deb_total} 个其余内核，开始卸载..."
 			for ((integer = 1; integer <= ${deb_total}; integer++)); do
-				deb_del=$(dpkg -l | grep linux-image | awk '{print $2}' | grep -v "${kernel_version}" | head -${integer})
+				deb_del=$(dpkg -l | grep linux-image | awk '{print $2}' | grep -v "${kernel_version}" | sed -n "${integer}p")
 				echo -e "开始卸载 ${deb_del} 内核..."
 				apt-get purge -y "${deb_del}"
 				apt-get autoremove -y
@@ -1571,7 +1592,7 @@ detele_kernel() {
 			done
 			echo -e "内核卸载完毕，继续..."
 		else
-			echo -e " 检测到 内核 数量不正确，请检查 !" && exit 1
+			echo -e "${Info} 未检测到需要自动卸载的 image 内核。"
 		fi
 	fi
 }
@@ -1583,24 +1604,24 @@ detele_kernel_head() {
 	fi
 	if [[ "${OS_type}" == "CentOS" ]]; then
 		rpm_total=$(rpm -qa | grep kernel-headers | grep -v "${kernel_version}" | grep -v "noarch" | wc -l)
-		if [ "${rpm_total}" ] >"1"; then
+		if (( rpm_total > 0 )); then
 			echo -e "检测到 ${rpm_total} 个其余head内核，开始卸载..."
 			for ((integer = 1; integer <= ${rpm_total}; integer++)); do
-				rpm_del=$(rpm -qa | grep kernel-headers | grep -v "${kernel_version}" | grep -v "noarch" | head -${integer})
+				rpm_del=$(rpm -qa | grep kernel-headers | grep -v "${kernel_version}" | grep -v "noarch" | sed -n "${integer}p")
 				echo -e "开始卸载 ${rpm_del} headers内核..."
 				rpm --nodeps -e "${rpm_del}"
 				echo -e "卸载 ${rpm_del} 内核卸载完成，继续..."
 			done
 			echo --nodeps -e "内核卸载完毕，继续..."
 		else
-			echo -e " 检测到 内核 数量不正确，请检查 !" && exit 1
+			echo -e "${Info} 未检测到需要自动卸载的 headers 内核。"
 		fi
 	elif [[ "${OS_type}" == "Debian" ]]; then
 		deb_total=$(dpkg -l | grep linux-headers | awk '{print $2}' | grep -v "${kernel_version}" | wc -l)
-		if [ "${deb_total}" ] >"1"; then
+		if (( deb_total > 0 )); then
 			echo -e "检测到 ${deb_total} 个其余head内核，开始卸载..."
 			for ((integer = 1; integer <= ${deb_total}; integer++)); do
-				deb_del=$(dpkg -l | grep linux-headers | awk '{print $2}' | grep -v "${kernel_version}" | head -${integer})
+				deb_del=$(dpkg -l | grep linux-headers | awk '{print $2}' | grep -v "${kernel_version}" | sed -n "${integer}p")
 				echo -e "开始卸载 ${deb_del} headers内核..."
 				apt-get purge -y "${deb_del}"
 				apt-get autoremove -y
@@ -1608,7 +1629,7 @@ detele_kernel_head() {
 			done
 			echo -e "内核卸载完毕，继续..."
 		else
-			echo -e " 检测到 内核 数量不正确，请检查 !" && exit 1
+			echo -e "${Info} 未检测到需要自动卸载的 headers 内核。"
 		fi
 	fi
 }
@@ -2457,17 +2478,22 @@ check_sys_official_xanmod_main() {
 	if [[ "${OS_type}" == "Debian" ]]; then
 		apt update
 		apt-get install gnupg ca-certificates wget -y
-		wget -qO- https://dl.xanmod.org/archive.key | gpg --dearmor -o /usr/share/keyrings/xanmod-archive-keyring.gpg
+		wget -qO- https://dl.xanmod.org/archive.key | gpg --batch --yes --dearmor -o /usr/share/keyrings/xanmod-archive-keyring.gpg
 		echo 'deb [signed-by=/usr/share/keyrings/xanmod-archive-keyring.gpg] http://deb.xanmod.org releases main' >/etc/apt/sources.list.d/xanmod-kernel.list
 		if [[ "${cpu_level}" == "4" ]]; then
 			apt update && apt install linux-xanmod-x64v3 -y
+			kernel_version=$(apt-cache show linux-xanmod-x64v3 2>/dev/null | awk -F'[:, ]+' '/^Depends: / {for (i = 1; i <= NF; i++) if ($i ~ /^linux-image-/) {sub(/^linux-image-/, "", $i); print $i; exit}}')
 		elif [[ "${cpu_level}" == "3" ]]; then
 			apt update && apt install linux-xanmod-x64v3 -y
+			kernel_version=$(apt-cache show linux-xanmod-x64v3 2>/dev/null | awk -F'[:, ]+' '/^Depends: / {for (i = 1; i <= NF; i++) if ($i ~ /^linux-image-/) {sub(/^linux-image-/, "", $i); print $i; exit}}')
 		elif [[ "${cpu_level}" == "2" ]]; then
 			apt update && apt install linux-xanmod-x64v2 -y
+			kernel_version=$(apt-cache show linux-xanmod-x64v2 2>/dev/null | awk -F'[:, ]+' '/^Depends: / {for (i = 1; i <= NF; i++) if ($i ~ /^linux-image-/) {sub(/^linux-image-/, "", $i); print $i; exit}}')
 		else
 			apt update && apt install linux-xanmod-x64v1 -y
+			kernel_version=$(apt-cache show linux-xanmod-x64v1 2>/dev/null | awk -F'[:, ]+' '/^Depends: / {for (i = 1; i <= NF; i++) if ($i ~ /^linux-image-/) {sub(/^linux-image-/, "", $i); print $i; exit}}')
 		fi
+		check_empty "${kernel_version}"
 	else
 		echo -e "${Error} 不支持当前系统 ${release} ${version} ${bit} !" && exit 1
 	fi
@@ -2490,19 +2516,24 @@ check_sys_official_xanmod_lts() {
 
 	if [[ "${OS_type}" == "Debian" ]]; then
 		apt update
-		apt-get install gnupg gnupg2 gnupg1 sudo -y
-		echo 'deb http://deb.xanmod.org releases main' | sudo tee /etc/apt/sources.list.d/xanmod-kernel.list
+		apt-get install gnupg gnupg2 gnupg1 -y
+		echo 'deb http://deb.xanmod.org releases main' >/etc/apt/sources.list.d/xanmod-kernel.list
 		# --[ 已修改 ]-- 使用 gpg --dearmor 替换 apt-key
-		wget -qO - https://dl.xanmod.org/gpg.key | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/xanmod-kernel.gpg
+		wget -qO - https://dl.xanmod.org/gpg.key | gpg --batch --yes --dearmor -o /etc/apt/trusted.gpg.d/xanmod-kernel.gpg
 		if [[ "${cpu_level}" == "4" ]]; then
 			apt update && apt install linux-xanmod-lts-x64v3 -y
+			kernel_version=$(apt-cache show linux-xanmod-lts-x64v3 2>/dev/null | awk -F'[:, ]+' '/^Depends: / {for (i = 1; i <= NF; i++) if ($i ~ /^linux-image-/) {sub(/^linux-image-/, "", $i); print $i; exit}}')
 		elif [[ "${cpu_level}" == "3" ]]; then
 			apt update && apt install linux-xanmod-lts-x64v3 -y
+			kernel_version=$(apt-cache show linux-xanmod-lts-x64v3 2>/dev/null | awk -F'[:, ]+' '/^Depends: / {for (i = 1; i <= NF; i++) if ($i ~ /^linux-image-/) {sub(/^linux-image-/, "", $i); print $i; exit}}')
 		elif [[ "${cpu_level}" == "2" ]]; then
 			apt update && apt install linux-xanmod-lts-x64v2 -y
+			kernel_version=$(apt-cache show linux-xanmod-lts-x64v2 2>/dev/null | awk -F'[:, ]+' '/^Depends: / {for (i = 1; i <= NF; i++) if ($i ~ /^linux-image-/) {sub(/^linux-image-/, "", $i); print $i; exit}}')
 		else
 			apt update && apt install linux-xanmod-lts-x64v1 -y
+			kernel_version=$(apt-cache show linux-xanmod-lts-x64v1 2>/dev/null | awk -F'[:, ]+' '/^Depends: / {for (i = 1; i <= NF; i++) if ($i ~ /^linux-image-/) {sub(/^linux-image-/, "", $i); print $i; exit}}')
 		fi
+		check_empty "${kernel_version}"
 	else
 		echo -e "${Error} 不支持当前系统 ${release} ${version} ${bit} !" && exit 1
 	fi
@@ -2525,19 +2556,24 @@ check_sys_official_xanmod_edge() {
 
 	if [[ "${OS_type}" == "Debian" ]]; then
 		apt update
-		apt-get install gnupg gnupg2 gnupg1 sudo -y
-		echo 'deb http://deb.xanmod.org releases main' | sudo tee /etc/apt/sources.list.d/xanmod-kernel.list
+		apt-get install gnupg gnupg2 gnupg1 -y
+		echo 'deb http://deb.xanmod.org releases main' >/etc/apt/sources.list.d/xanmod-kernel.list
 		# --[ 已修改 ]-- 使用 gpg --dearmor 替换 apt-key
-		wget -qO - https://dl.xanmod.org/gpg.key | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/xanmod-kernel.gpg
+		wget -qO - https://dl.xanmod.org/gpg.key | gpg --batch --yes --dearmor -o /etc/apt/trusted.gpg.d/xanmod-kernel.gpg
 		if [[ "${cpu_level}" == "4" ]]; then
 			apt update && apt install linux-xanmod-edge-x64v3 -y
+			kernel_version=$(apt-cache show linux-xanmod-edge-x64v3 2>/dev/null | awk -F'[:, ]+' '/^Depends: / {for (i = 1; i <= NF; i++) if ($i ~ /^linux-image-/) {sub(/^linux-image-/, "", $i); print $i; exit}}')
 		elif [[ "${cpu_level}" == "3" ]]; then
 			apt update && apt install linux-xanmod-edge-x64v3 -y
+			kernel_version=$(apt-cache show linux-xanmod-edge-x64v3 2>/dev/null | awk -F'[:, ]+' '/^Depends: / {for (i = 1; i <= NF; i++) if ($i ~ /^linux-image-/) {sub(/^linux-image-/, "", $i); print $i; exit}}')
 		elif [[ "${cpu_level}" == "2" ]]; then
 			apt update && apt install linux-xanmod-edge-x64v2 -y
+			kernel_version=$(apt-cache show linux-xanmod-edge-x64v2 2>/dev/null | awk -F'[:, ]+' '/^Depends: / {for (i = 1; i <= NF; i++) if ($i ~ /^linux-image-/) {sub(/^linux-image-/, "", $i); print $i; exit}}')
 		else
 			apt update && apt install linux-xanmod-edge-x64v1 -y
+			kernel_version=$(apt-cache show linux-xanmod-edge-x64v1 2>/dev/null | awk -F'[:, ]+' '/^Depends: / {for (i = 1; i <= NF; i++) if ($i ~ /^linux-image-/) {sub(/^linux-image-/, "", $i); print $i; exit}}')
 		fi
+		check_empty "${kernel_version}"
 	else
 		echo -e "${Error} 不支持当前系统 ${release} ${version} ${bit} !" && exit 1
 	fi
@@ -2560,19 +2596,24 @@ check_sys_official_xanmod_rt() {
 
 	if [[ "${OS_type}" == "Debian" ]]; then
 		apt update
-		apt-get install gnupg gnupg2 gnupg1 sudo -y
-		echo 'deb http://deb.xanmod.org releases main' | sudo tee /etc/apt/sources.list.d/xanmod-kernel.list
+		apt-get install gnupg gnupg2 gnupg1 -y
+		echo 'deb http://deb.xanmod.org releases main' >/etc/apt/sources.list.d/xanmod-kernel.list
 		# --[ 已修改 ]-- 使用 gpg --dearmor 替换 apt-key
-		wget -qO - https://dl.xanmod.org/gpg.key | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/xanmod-kernel.gpg
+		wget -qO - https://dl.xanmod.org/gpg.key | gpg --batch --yes --dearmor -o /etc/apt/trusted.gpg.d/xanmod-kernel.gpg
 		if [[ "${cpu_level}" == "4" ]]; then
 			apt update && apt install linux-xanmod-rt-x64v3 -y
+			kernel_version=$(apt-cache show linux-xanmod-rt-x64v3 2>/dev/null | awk -F'[:, ]+' '/^Depends: / {for (i = 1; i <= NF; i++) if ($i ~ /^linux-image-/) {sub(/^linux-image-/, "", $i); print $i; exit}}')
 		elif [[ "${cpu_level}" == "3" ]]; then
 			apt update && apt install linux-xanmod-rt-x64v3 -y
+			kernel_version=$(apt-cache show linux-xanmod-rt-x64v3 2>/dev/null | awk -F'[:, ]+' '/^Depends: / {for (i = 1; i <= NF; i++) if ($i ~ /^linux-image-/) {sub(/^linux-image-/, "", $i); print $i; exit}}')
 		elif [[ "${cpu_level}" == "2" ]]; then
 			apt update && apt install linux-xanmod-rt-x64v2 -y
+			kernel_version=$(apt-cache show linux-xanmod-rt-x64v2 2>/dev/null | awk -F'[:, ]+' '/^Depends: / {for (i = 1; i <= NF; i++) if ($i ~ /^linux-image-/) {sub(/^linux-image-/, "", $i); print $i; exit}}')
 		else
 			apt update && apt install linux-xanmod-rt-x64v1 -y
+			kernel_version=$(apt-cache show linux-xanmod-rt-x64v1 2>/dev/null | awk -F'[:, ]+' '/^Depends: / {for (i = 1; i <= NF; i++) if ($i ~ /^linux-image-/) {sub(/^linux-image-/, "", $i); print $i; exit}}')
 		fi
+		check_empty "${kernel_version}"
 	else
 		echo -e "${Error} 不支持当前系统 ${release} ${version} ${bit} !" && exit 1
 	fi
