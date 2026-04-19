@@ -55,6 +55,113 @@ show_kernel_install_finish_notice() {
   echo -e "${Tip} 重启VPS后，请重新运行脚本开启${Red_font_prefix}${feature}${Font_color_suffix}"
 }
 
+AUTO_REBOOT_TARGET_MENU=""
+AUTO_REBOOT_DELAY="${TCP_AUTO_REBOOT_DELAY:-15}"
+
+should_auto_reboot_after_action() {
+  [[ -n "${AUTO_REBOOT_TARGET_MENU}" ]]
+}
+
+schedule_auto_reboot_after_success() {
+  local menu_id="$1"
+  local expected_kernel="${2:-}"
+  local verifier="/tmp/linux-netspeed-auto-reboot-${menu_id}-$$.sh"
+  local log_file="/var/log/linux-netspeed-auto-reboot.log"
+
+  cat >"${verifier}" <<'EOF_AUTO_REBOOT'
+#!/usr/bin/env bash
+set +e
+menu_id="$1"
+expected_kernel="$2"
+delay="$3"
+log_file="$4"
+
+trap 'rm -f "$0"' EXIT
+
+log() {
+  printf '[%s] %s\n' "$(date '+%F %T')" "$*" >>"${log_file}"
+}
+
+check_menu_success() {
+  case "${menu_id}" in
+  1 | 2)
+    [[ -n "${expected_kernel}" ]] || return 1
+    if [[ ! -f "/boot/vmlinuz-${expected_kernel}" ]] && [[ ! -f "/boot/initrd.img-${expected_kernel}" ]]; then
+      return 1
+    fi
+    if [[ -f /etc/default/grub ]] && ! grep -q "${expected_kernel}" /etc/default/grub; then
+      return 1
+    fi
+    return 0
+    ;;
+  11 | 14)
+    [[ "$(cat /proc/sys/net/core/default_qdisc 2>/dev/null)" == "fq" ]] || return 1
+    [[ "$(cat /proc/sys/net/ipv4/tcp_congestion_control 2>/dev/null)" == "bbr" ]]
+    ;;
+  12 | 15)
+    [[ "$(cat /proc/sys/net/core/default_qdisc 2>/dev/null)" == "fq_pie" ]] || return 1
+    [[ "$(cat /proc/sys/net/ipv4/tcp_congestion_control 2>/dev/null)" == "bbr" ]]
+    ;;
+  13 | 16)
+    [[ "$(cat /proc/sys/net/core/default_qdisc 2>/dev/null)" == "cake" ]] || return 1
+    [[ "$(cat /proc/sys/net/ipv4/tcp_congestion_control 2>/dev/null)" == "bbr" ]]
+    ;;
+  21)
+    grep -Fq 'net.ipv4.tcp_retries2 = 8' /etc/sysctl.d/99-sysctl.conf || return 1
+    grep -Fq 'net.core.somaxconn = 32768' /etc/sysctl.d/99-sysctl.conf || return 1
+    grep -Fq '1000000' /etc/security/limits.conf
+    ;;
+  22)
+    grep -Fq 'net.core.netdev_max_backlog = 100000' /etc/sysctl.d/99-sysctl.conf || return 1
+    grep -Fq 'net.ipv4.tcp_congestion_control = bbr' /etc/sysctl.d/99-sysctl.conf || return 1
+    grep -Fq 'DefaultLimitNOFILE=infinity' /etc/systemd/system.conf
+    ;;
+  *)
+    return 1
+    ;;
+  esac
+}
+
+for _ in $(seq 1 90); do
+  if check_menu_success; then
+    log "menu ${menu_id} verification passed; rebooting in ${delay}s"
+    sleep "${delay}"
+    reboot >/dev/null 2>&1 || systemctl reboot >/dev/null 2>&1 || shutdown -r now >/dev/null 2>&1
+    exit 0
+  fi
+  sleep 2
+done
+
+log "menu ${menu_id} verification timed out; reboot skipped"
+exit 1
+EOF_AUTO_REBOOT
+
+  chmod +x "${verifier}"
+  nohup bash "${verifier}" "${menu_id}" "${expected_kernel}" "${AUTO_REBOOT_DELAY}" "${log_file}" >/dev/null 2>&1 &
+  disown 2>/dev/null || true
+  echo -e "${Info} 已启动后台成功检测，验证通过后将在 ${AUTO_REBOOT_DELAY} 秒后自动重启服务器。"
+  echo -e "${Info} 后台日志: ${log_file}"
+}
+
+run_menu_action_with_auto_reboot() {
+  local menu_id="$1"
+  local action_name="$2"
+  local expected_kernel=""
+  local status=0
+
+  AUTO_REBOOT_TARGET_MENU="${menu_id}"
+  "${action_name}"
+  status=$?
+  expected_kernel="${kernel_version:-}"
+  AUTO_REBOOT_TARGET_MENU=""
+
+  if [[ ${status} -eq 0 ]]; then
+    schedule_auto_reboot_after_success "${menu_id}" "${expected_kernel}"
+  fi
+
+  return "${status}"
+}
+
 #优化系统配置
 optimizing_system_old() {
   if [ ! -f "/etc/sysctl.d/99-sysctl.conf" ]; then
@@ -103,6 +210,10 @@ net.ipv4.tcp_max_orphans = 32768
   echo "*               soft    nofile           1000000
 *               hard    nofile          1000000" >/etc/security/limits.conf
   echo "ulimit -SHn 1000000" >>/etc/profile
+  if should_auto_reboot_after_action; then
+    echo -e "${Info} 当前操作已启用后台检测，验证通过后将自动重启。"
+    return 0
+  fi
   read -p "需要重启VPS后，才能生效系统优化配置，是否现在重启 ? [Y/n] :" yn
   [ -z "${yn}" ] && yn="y"
   if [[ $yn == [Yy] ]]; then
@@ -819,6 +930,10 @@ installbbr() {
   BBR_grub
   show_kernel_install_finish_notice "BBR"
   check_kernel
+  if should_auto_reboot_after_action; then
+    echo -e "${Info} 当前操作已启用后台检测，验证通过后将自动重启。"
+    return 0
+  fi
   stty erase '^H' && read -p "需要重启VPS后，才能开启BBR，是否现在重启 ? [Y/n] :" yn
   [ -z "${yn}" ] && yn="y"
   if [[ $yn == [Yy] ]]; then
@@ -1102,6 +1217,10 @@ installxanmod() {
   BBR_grub
   show_kernel_install_finish_notice "BBR"
   check_kernel
+  if should_auto_reboot_after_action; then
+    echo -e "${Info} 当前操作已启用后台检测，验证通过后将自动重启。"
+    return 0
+  fi
   stty erase '^H' && read -p "需要重启VPS后，才能开启BBR，是否现在重启 ? [Y/n] :" yn
   [ -z "${yn}" ] && yn="y"
   if [[ $yn == [Yy] ]]; then
@@ -1708,10 +1827,10 @@ start_menu() {
     Update_Shell
     ;;
   1)
-    check_sys_bbr
+    run_menu_action_with_auto_reboot 1 check_sys_bbr
     ;;
   2)
-    check_sys_official_xanmod_main
+    run_menu_action_with_auto_reboot 2 check_sys_official_xanmod_main
     ;;
   3)
     check_sys_Lotsever
@@ -1732,22 +1851,22 @@ start_menu() {
     gotoipcheck
     ;;
   11)
-    startbbrfq
+    run_menu_action_with_auto_reboot 11 startbbrfq
     ;;
   12)
-    startbbrfqpie
+    run_menu_action_with_auto_reboot 12 startbbrfqpie
     ;;
   13)
-    startbbrcake
+    run_menu_action_with_auto_reboot 13 startbbrcake
     ;;
   14)
-    startbbr2fq
+    run_menu_action_with_auto_reboot 14 startbbr2fq
     ;;
   15)
-    startbbr2fqpie
+    run_menu_action_with_auto_reboot 15 startbbr2fqpie
     ;;
   16)
-    startbbr2cake
+    run_menu_action_with_auto_reboot 16 startbbr2cake
     ;;
   17)
     startecn
@@ -1762,10 +1881,10 @@ start_menu() {
     startlotserver
     ;;
   21)
-    optimizing_system_old
+    run_menu_action_with_auto_reboot 21 optimizing_system_old
     ;;
   22)
-    optimizing_system_johnrosen1
+    run_menu_action_with_auto_reboot 22 optimizing_system_johnrosen1
     ;;
   23)
     closeipv6
