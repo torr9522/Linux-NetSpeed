@@ -49,7 +49,7 @@ sudo() {
 }
 
 AUTO_REBOOT_TARGET_MENU=""
-AUTO_REBOOT_DELAY="${TCPX_AUTO_REBOOT_DELAY:-15}"
+AUTO_REBOOT_DELAY="${TCPX_AUTO_REBOOT_DELAY:-1}"
 
 should_auto_reboot_after_action() {
 	[[ -n "${AUTO_REBOOT_TARGET_MENU}" ]]
