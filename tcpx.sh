@@ -16,10 +16,12 @@ export PATH
 # SKYBLUE='\033[0;36m'
 # PLAIN='\033[0m'
 
-sh_ver="100.0.4.15"
+sh_ver="100.0.4.15-local"
 github="raw.githubusercontent.com/torr9522/Linux-NetSpeed/tcpx.sh"
 AUTO_CLEAN_OLD_KERNELS="${TCPX_AUTO_CLEAN_OLD_KERNELS:-0}"
-FORCE_KERNEL_DELETE=0
+KERNEL_MODE_BANNER="不卸内核"
+KERNEL_MODE_NOTICE="保留旧内核，仅切换默认启动项"
+PEER_SCRIPT_REMOTE_URL="https://raw.githubusercontent.com/torr9522/Linux-NetSpeed/tcp.sh/tcp.sh"
 
 imgurl=""
 headurl=""
@@ -48,111 +50,28 @@ sudo() {
 	"$@"
 }
 
-AUTO_REBOOT_TARGET_MENU=""
-AUTO_REBOOT_DELAY="${TCPX_AUTO_REBOOT_DELAY:-1}"
-
-should_auto_reboot_after_action() {
-	[[ -n "${AUTO_REBOOT_TARGET_MENU}" ]]
+show_kernel_install_finish_notice() {
+	echo -e "${Tip} 当前默认模式为${KERNEL_MODE_NOTICE}"
+	echo -e "${Tip} ${Red_font_prefix}请检查上面是否有内核信息，无内核千万别重启${Font_color_suffix}"
+	echo -e "${Tip} ${Red_font_prefix}rescue 不是正常内核，要排除这个${Font_color_suffix}"
+	echo -e "${Tip} 重启 VPS 后，请重新运行脚本继续配置加速功能"
 }
 
-schedule_auto_reboot_after_success() {
-	local menu_id="$1"
-	local expected_kernel="${2:-}"
-	local verifier="/tmp/linux-netspeed-auto-reboot-${menu_id}-$$.sh"
-	local log_file="/var/log/linux-netspeed-auto-reboot.log"
+run_local_or_remote_script() {
+	local remote_url="$1"
+	shift
+	local script_dir=""
+	local candidate=""
+	script_dir="$(cd -- "$(dirname -- "$(readlink -f "${BASH_SOURCE[0]}")")" >/dev/null 2>&1 && pwd -P)"
 
-	cat >"${verifier}" <<'EOF_AUTO_REBOOT'
-#!/usr/bin/env bash
-set +e
-menu_id="$1"
-expected_kernel="$2"
-delay="$3"
-log_file="$4"
-
-trap 'rm -f "$0"' EXIT
-
-log() {
-	printf '[%s] %s\n' "$(date '+%F %T')" "$*" >>"${log_file}"
-}
-
-check_menu_success() {
-	case "${menu_id}" in
-	1 | 2)
-		[[ -n "${expected_kernel}" ]] || return 1
-		if [[ ! -f "/boot/vmlinuz-${expected_kernel}" ]] && [[ ! -f "/boot/initrd.img-${expected_kernel}" ]]; then
-			return 1
+	for candidate in "$@"; do
+		if [[ -f "${script_dir}/${candidate}" ]]; then
+			bash "${script_dir}/${candidate}"
+			return $?
 		fi
-		if [[ -f /etc/default/grub ]] && ! grep -q "${expected_kernel}" /etc/default/grub; then
-			return 1
-		fi
-		return 0
-		;;
-	11 | 14)
-		[[ "$(cat /proc/sys/net/core/default_qdisc 2>/dev/null)" == "fq" ]] || return 1
-		[[ "$(cat /proc/sys/net/ipv4/tcp_congestion_control 2>/dev/null)" == "bbr" ]]
-		;;
-	12 | 15)
-		[[ "$(cat /proc/sys/net/core/default_qdisc 2>/dev/null)" == "fq_pie" ]] || return 1
-		[[ "$(cat /proc/sys/net/ipv4/tcp_congestion_control 2>/dev/null)" == "bbr" ]]
-		;;
-	13 | 16)
-		[[ "$(cat /proc/sys/net/core/default_qdisc 2>/dev/null)" == "cake" ]] || return 1
-		[[ "$(cat /proc/sys/net/ipv4/tcp_congestion_control 2>/dev/null)" == "bbr" ]]
-		;;
-	21)
-		grep -Fq 'net.ipv4.tcp_retries2 = 8' /etc/sysctl.d/99-sysctl.conf || return 1
-		grep -Fq 'net.core.somaxconn = 32768' /etc/sysctl.d/99-sysctl.conf || return 1
-		grep -Fq '1000000' /etc/security/limits.conf
-		;;
-	22)
-		grep -Fq 'net.core.netdev_max_backlog = 100000' /etc/sysctl.d/99-sysctl.conf || return 1
-		grep -Fq 'net.ipv4.tcp_congestion_control = bbr' /etc/sysctl.d/99-sysctl.conf || return 1
-		grep -Fq 'DefaultLimitNOFILE=infinity' /etc/systemd/system.conf
-		;;
-	*)
-		return 1
-		;;
-	esac
-}
+	done
 
-for _ in $(seq 1 90); do
-	if check_menu_success; then
-		log "menu ${menu_id} verification passed; rebooting in ${delay}s"
-		sleep "${delay}"
-		reboot >/dev/null 2>&1 || systemctl reboot >/dev/null 2>&1 || shutdown -r now >/dev/null 2>&1
-		exit 0
-	fi
-	sleep 2
-done
-
-log "menu ${menu_id} verification timed out; reboot skipped"
-exit 1
-EOF_AUTO_REBOOT
-
-	chmod +x "${verifier}"
-	nohup bash "${verifier}" "${menu_id}" "${expected_kernel}" "${AUTO_REBOOT_DELAY}" "${log_file}" >/dev/null 2>&1 &
-	disown 2>/dev/null || true
-	echo -e "${Info} 已启动后台成功检测，验证通过后将在 ${AUTO_REBOOT_DELAY} 秒后自动重启服务器。"
-	echo -e "${Info} 后台日志: ${log_file}"
-}
-
-run_menu_action_with_auto_reboot() {
-	local menu_id="$1"
-	local action_name="$2"
-	local expected_kernel=""
-	local status=0
-
-	AUTO_REBOOT_TARGET_MENU="${menu_id}"
-	"${action_name}"
-	status=$?
-	expected_kernel="${kernel_version:-}"
-	AUTO_REBOOT_TARGET_MENU=""
-
-	if [[ ${status} -eq 0 ]]; then
-		schedule_auto_reboot_after_success "${menu_id}" "${expected_kernel}"
-	fi
-
-	return "${status}"
+	bash <(wget -qO- "$remote_url")
 }
 
 #优化系统配置
@@ -203,10 +122,6 @@ net.ipv4.tcp_max_orphans = 32768
 	echo "*               soft    nofile           1000000
 *               hard    nofile          1000000" >/etc/security/limits.conf
 	echo "ulimit -SHn 1000000" >>/etc/profile
-	if should_auto_reboot_after_action; then
-		echo -e "${Info} 当前操作已启用后台检测，验证通过后将自动重启。"
-		return 0
-	fi
 	read -p "需要重启VPS后，才能生效系统优化配置，是否现在重启 ? [Y/n] :" yn
 	[ -z "${yn}" ] && yn="y"
 	if [[ $yn == [Yy] ]]; then
@@ -732,7 +647,7 @@ installbbr() {
 	cd .. && rm -rf bbr
 
 	BBR_grub
-	echo -e "${Tip} 内核安装完毕，当前默认模式为保留旧内核，仅切换默认启动项，请参考上面的信息检查是否安装成功"
+	show_kernel_install_finish_notice
 	check_kernel
 }
 
@@ -784,112 +699,7 @@ installbbrplus() {
 
 	cd .. && rm -rf bbrplus
 	BBR_grub
-	echo -e "${Tip} 内核安装完毕，当前默认模式为保留旧内核，仅切换默认启动项，请参考上面的信息检查是否安装成功"
-	check_kernel
-}
-
-#安装Lotserver内核
-installlot() {
-	bit=$(uname -m)
-	if [[ ${bit} != "x86_64" ]]; then
-		echo -e "${Error} 不支持x86_64以外的系统 !" && exit 1
-	fi
-	if [[ ${bit} == "x86_64" ]]; then
-		bit='x64'
-	fi
-	if [[ ${bit} == "i386" ]]; then
-		bit='x32'
-	fi
-	if [[ "${OS_type}" == "CentOS" ]]; then
-		rpm --import http://${github}/lotserver/"${release}"/RPM-GPG-KEY-elrepo.org
-		yum remove -y kernel-firmware
-		yum install -y http://${github}/lotserver/"${release}"/"${version}"/"${bit}"/kernel-firmware-${kernel_version}.rpm
-		yum install -y http://${github}/lotserver/"${release}"/"${version}"/"${bit}"/kernel-${kernel_version}.rpm
-		yum remove -y kernel-headers
-		yum install -y http://${github}/lotserver/"${release}"/"${version}"/"${bit}"/kernel-headers-${kernel_version}.rpm
-		yum install -y http://${github}/lotserver/"${release}"/"${version}"/"${bit}"/kernel-devel-${kernel_version}.rpm
-	fi
-
-	if [[ "${OS_type}" == "Debian" ]]; then
-		deb_issue="$(cat /etc/issue)"
-		deb_relese="$(echo "$deb_issue" | grep -io 'Ubuntu\|Debian' | sed -r 's/(.*)/\L\1/')"
-		os_ver="$(dpkg --print-architecture)"
-		[ -n "$os_ver" ] || exit 1
-		if [ "$deb_relese" == 'ubuntu' ]; then
-			deb_ver="$(echo "$deb_issue" | grep -o '[0-9]*\.[0-9]*' | head -n1)"
-			if [ "$deb_ver" == "14.04" ]; then
-				kernel_version="3.16.0-77-generic" && item="3.16.0-77-generic" && ver='trusty'
-			elif [ "$deb_ver" == "16.04" ]; then
-				kernel_version="4.8.0-36-generic" && item="4.8.0-36-generic" && ver='xenial'
-			elif [ "$deb_ver" == "18.04" ]; then
-				kernel_version="4.15.0-30-generic" && item="4.15.0-30-generic" && ver='bionic'
-			else
-				exit 1
-			fi
-			url='archive.ubuntu.com'
-			urls='security.ubuntu.com'
-		elif [ "$deb_relese" == 'debian' ]; then
-			deb_ver="$(echo "$deb_issue" | grep -o '[0-9]*' | head -n1)"
-			if [ "$deb_ver" == "7" ]; then
-				kernel_version="3.2.0-4-${os_ver}" && item="3.2.0-4-${os_ver}" && ver='wheezy' && url='archive.debian.org' && urls='archive.debian.org'
-			elif [ "$deb_ver" == "8" ]; then
-				kernel_version="3.16.0-4-${os_ver}" && item="3.16.0-4-${os_ver}" && ver='jessie' && url='archive.debian.org' && urls='archive.debian.org'
-			elif [ "$deb_ver" == "9" ]; then
-				kernel_version="4.9.0-4-${os_ver}" && item="4.9.0-4-${os_ver}" && ver='stretch' && url='archive.debian.org' && urls='archive.debian.org'
-			else
-				exit 1
-			fi
-		fi
-		[ -n "$item" ] && [ -n "$urls" ] && [ -n "$url" ] && [ -n "$ver" ] || exit 1
-		if [ "$deb_relese" == 'ubuntu' ]; then
-			echo "deb http://${url}/${deb_relese} ${ver} main restricted universe multiverse" >/etc/apt/sources.list
-			echo "deb http://${url}/${deb_relese} ${ver}-updates main restricted universe multiverse" >>/etc/apt/sources.list
-			echo "deb http://${url}/${deb_relese} ${ver}-backports main restricted universe multiverse" >>/etc/apt/sources.list
-			echo "deb http://${urls}/${deb_relese} ${ver}-security main restricted universe multiverse" >>/etc/apt/sources.list
-
-			apt-get update || apt-get --allow-releaseinfo-change update
-			apt-get install --no-install-recommends -y linux-image-"${item}"
-		elif [ "$deb_relese" == 'debian' ]; then
-			echo "deb http://${url}/${deb_relese} ${ver} main" >/etc/apt/sources.list
-			echo "deb-src http://${url}/${deb_relese} ${ver} main" >>/etc/apt/sources.list
-			echo "deb http://${urls}/${deb_relese}-security ${ver}/updates main" >>/etc/apt/sources.list
-			echo "deb-src http://${urls}/${deb_relese}-security ${ver}/updates main" >>/etc/apt/sources.list
-
-			if [ "$deb_ver" == "8" ]; then
-				dpkg -l | grep -q 'linux-base' || {
-					wget --no-check-certificate -qO '/tmp/linux-base_3.5_all.deb' 'http://snapshot.debian.org/archive/debian/20120304T220938Z/pool/main/l/linux-base/linux-base_3.5_all.deb'
-					dpkg -i '/tmp/linux-base_3.5_all.deb'
-				}
-				wget --no-check-certificate -qO '/tmp/linux-image-3.16.0-4-amd64_3.16.43-2+deb8u5_amd64.deb' 'http://snapshot.debian.org/archive/debian/20171008T163152Z/pool/main/l/linux/linux-image-3.16.0-4-amd64_3.16.43-2+deb8u5_amd64.deb'
-				dpkg -i '/tmp/linux-image-3.16.0-4-amd64_3.16.43-2+deb8u5_amd64.deb'
-
-				if [ $? -ne 0 ]; then
-					exit 1
-				fi
-			elif [ "$deb_ver" == "9" ]; then
-				dpkg -l | grep -q 'linux-base' || {
-					wget --no-check-certificate -qO '/tmp/linux-base_4.5_all.deb' 'http://snapshot.debian.org/archive/debian/20160917T042239Z/pool/main/l/linux-base/linux-base_4.5_all.deb'
-					dpkg -i '/tmp/linux-base_4.5_all.deb'
-				}
-				wget --no-check-certificate -qO '/tmp/linux-image-4.9.0-4-amd64_4.9.65-3+deb9u1_amd64.deb' 'http://snapshot.debian.org/archive/debian/20171224T175424Z/pool/main/l/linux/linux-image-4.9.0-4-amd64_4.9.65-3+deb9u1_amd64.deb'
-				dpkg -i '/tmp/linux-image-4.9.0-4-amd64_4.9.65-3+deb9u1_amd64.deb'
-				##备选
-				#https://debian.sipwise.com/debian-security/pool/main/l/linux/linux-image-4.9.0-4-amd64_4.9.65-3+deb9u1_amd64.deb
-				#http://snapshot.debian.org/archive/debian/20171224T175424Z/pool/main/l/linux/linux-image-4.9.0-4-amd64_4.9.65-3+deb9u1_amd64.deb
-				#http://snapshot.debian.org/archive/debian/20171231T180144Z/pool/main/l/linux/linux-image-4.9.0-4-amd64_4.9.65-3_amd64.deb
-				if [ $? -ne 0 ]; then
-					exit 1
-				fi
-			else
-				exit 1
-			fi
-		fi
-		apt-get autoremove -y
-		[ -d '/var/lib/apt/lists' ] && find /var/lib/apt/lists -type f -delete
-	fi
-
-	BBR_grub
-	echo -e "${Tip} 内核安装完毕，当前默认模式为保留旧内核，仅切换默认启动项，请参考上面的信息检查是否安装成功"
+	show_kernel_install_finish_notice
 	check_kernel
 }
 
@@ -949,7 +759,6 @@ installxanmod() {
 			headurl=$(check_cn $headurl)
 			imgurl=$(check_cn $imgurl)
 
-			kernel_version="5.15.95-xanmod1"
 			download_file "$headurl" linux-headers-d10.deb
 			download_file "$imgurl" linux-image-d10.deb
 			dpkg -i linux-image-d10.deb
@@ -959,217 +768,10 @@ installxanmod() {
 		fi
 	fi
 
-	cd .. && rm -rf xanmod
+	#cd .. && rm -rf xanmod
 	BBR_grub
-	echo -e "${Tip} 内核安装完毕，当前默认模式为保留旧内核，仅切换默认启动项，请参考上面的信息检查是否安装成功"
+	show_kernel_install_finish_notice
 	check_kernel
-}
-
-#安装bbr2内核 集成到xanmod内核了
-#安装bbrplus 新内核
-#2021.3.15 开始由https://github.com/UJX6N/bbrplus-5.19 替换bbrplusnew
-#2021.4.12 地址更新为https://github.com/ylx2016/kernel/releases
-#2021.9.2 再次改为https://github.com/UJX6N/bbrplus
-#2022.9.6 改为https://github.com/UJX6N/bbrplus-5.19
-#2022.11.24 改为https://github.com/UJX6N/bbrplus-6.x_stable
-
-installbbrplusnew() {
-	github_ver_plus=$(curl -s https://api.github.com/repos/torr9522/Linux-NetSpeed/releases | grep /Linux-NetSpeed/releases/tag/ | head -1 | awk -F "[/]" '{print $8}' | awk -F "[\"]" '{print $1}')
-	github_ver_plus_num=$(curl -s https://api.github.com/repos/torr9522/Linux-NetSpeed/releases | grep /Linux-NetSpeed/releases/tag/ | head -1 | awk -F "[/]" '{print $8}' | awk -F "[\"]" '{print $1}' | awk -F "[-]" '{print $1}')
-	echo -e "获取的UJX6N的bbrplus-6.x_stable版本号为:${Green_font_prefix}${github_ver_plus}${Font_color_suffix}"
-	echo -e "如果下载地址出错，可能当前正在更新，超过半天还是出错请反馈，大陆自行解决污染问题"
-	echo -e "${Green_font_prefix}安装失败这边反馈，内核问题给UJX6N反馈${Font_color_suffix}"
-	# kernel_version=$github_ver_plus
-
-	bit=$(uname -m)
-	#if [[ ${bit} != "x86_64" ]]; then
-	#  echo -e "${Error} 不支持x86_64以外的系统 !" && exit 1
-	#fi
-	rm -rf bbrplusnew
-	mkdir bbrplusnew && cd bbrplusnew || exit
-	if [[ "${OS_type}" == "CentOS" ]]; then
-		if [[ ${version} == "7" ]]; then
-			if [[ ${bit} == "x86_64" ]]; then
-				kernel_version=${github_ver_plus_num}-bbrplus
-				detele_kernel_head
-				headurl=$(curl -s 'https://api.github.com/repos/torr9522/Linux-NetSpeed/releases' | grep "${github_ver_plus}" | grep 'rpm' | grep 'headers' | grep 'el7' | awk -F '"' '{print $4}' | grep 'http')
-				imgurl=$(curl -s 'https://api.github.com/repos/torr9522/Linux-NetSpeed/releases' | grep "${github_ver_plus}" | grep 'rpm' | grep -v 'devel' | grep -v 'headers' | grep -v 'Source' | grep 'el7' | awk -F '"' '{print $4}' | grep 'http')
-
-				headurl=$(check_cn "$headurl")
-				imgurl=$(check_cn "$imgurl")
-
-				wget -O kernel-c7.rpm "$headurl"
-				wget -O kernel-headers-c7.rpm "$imgurl"
-				yum install -y kernel-c7.rpm
-				yum install -y kernel-headers-c7.rpm
-			else
-				echo -e "${Error} 不支持x86_64以外的系统 !" && exit 1
-			fi
-		fi
-		if [[ ${version} == "8" ]]; then
-			if [[ ${bit} == "x86_64" ]]; then
-				kernel_version=${github_ver_plus_num}-bbrplus
-				detele_kernel_head
-				headurl=$(curl -s 'https://api.github.com/repos/torr9522/Linux-NetSpeed/releases' | grep "${github_ver_plus}" | grep 'rpm' | grep 'headers' | grep 'el8.x86_64' | grep 'https' | awk -F '"' '{print $4}' | grep 'http')
-				imgurl=$(curl -s 'https://api.github.com/repos/torr9522/Linux-NetSpeed/releases' | grep "${github_ver_plus}" | grep 'rpm' | grep -v 'devel' | grep -v 'headers' | grep -v 'Source' | grep 'el8.x86_64' | grep 'https' | awk -F '"' '{print $4}' | grep 'http')
-
-				headurl=$(check_cn "$headurl")
-				imgurl=$(check_cn "$imgurl")
-
-				wget -O kernel-c8.rpm "$headurl"
-				wget -O kernel-headers-c8.rpm "$imgurl"
-				yum install -y kernel-c8.rpm
-				yum install -y kernel-headers-c8.rpm
-			else
-				echo -e "${Error} 不支持x86_64以外的系统 !" && exit 1
-			fi
-		fi
-	elif [[ "${OS_type}" == "Debian" ]]; then
-		if [[ ${bit} == "x86_64" ]]; then
-			kernel_version=${github_ver_plus_num}-bbrplus
-			detele_kernel_head
-			headurl=$(curl -s 'https://api.github.com/repos/torr9522/Linux-NetSpeed/releases' | grep "${github_ver_plus}" | grep 'https' | grep 'amd64.deb' | grep 'headers' | awk -F '"' '{print $4}' | grep 'http')
-			imgurl=$(curl -s 'https://api.github.com/repos/torr9522/Linux-NetSpeed/releases' | grep "${github_ver_plus}" | grep 'https' | grep 'amd64.deb' | grep 'image' | awk -F '"' '{print $4}' | grep 'http')
-
-			headurl=$(check_cn "$headurl")
-			imgurl=$(check_cn "$imgurl")
-
-			download_file "$headurl" linux-headers-d10.deb
-			download_file "$imgurl" linux-image-d10.deb
-			dpkg -i linux-image-d10.deb
-			dpkg -i linux-headers-d10.deb
-		elif [[ ${bit} == "aarch64" ]]; then
-			kernel_version=${github_ver_plus_num}-bbrplus
-			detele_kernel_head
-			headurl=$(curl -s 'https://api.github.com/repos/torr9522/Linux-NetSpeed/releases' | grep "${github_ver_plus}" | grep 'https' | grep 'arm64.deb' | grep 'headers' | awk -F '"' '{print $4}')
-			imgurl=$(curl -s 'https://api.github.com/repos/torr9522/Linux-NetSpeed/releases' | grep "${github_ver_plus}" | grep 'https' | grep 'arm64.deb' | grep 'image' | awk -F '"' '{print $4}')
-
-			headurl=$(check_cn "$headurl")
-			imgurl=$(check_cn "$imgurl")
-
-			download_file "$headurl" linux-headers-d10.deb
-			download_file "$imgurl" linux-image-d10.deb
-			dpkg -i linux-image-d10.deb
-			dpkg -i linux-headers-d10.deb
-		else
-			echo -e "${Error} 不支持x86_64及arm64/aarch64以外的系统 !" && exit 1
-		fi
-	fi
-
-	cd .. && rm -rf bbrplusnew
-	BBR_grub
-	echo -e "${Tip} 内核安装完毕，当前默认模式为保留旧内核，仅切换默认启动项，请参考上面的信息检查是否安装成功"
-	check_kernel
-
-}
-
-#安装cloud内核
-installcloud() {
-
-	# 检查当前系统发行版
-	local DISTRO=$(grep -oP '(?<=^ID=).+' /etc/os-release | tr -d '"')
-	local ARCH=$(uname -m)
-	local VERSIONS=()
-	local VERSION_MAP_FILE="/tmp/version_map.txt"
-
-	# 检查架构并设置 IMAGE_URL 和 IMAGE_PATTERN
-	local IMAGE_URL
-	local IMAGE_PATTERN
-	if [ "$ARCH" == "x86_64" ]; then
-		IMAGE_URL="https://deb.debian.org/debian/pool/main/l/linux-signed-amd64/"
-		IMAGE_PATTERN='linux-image-[^"]+cloud-amd64_[^"]+_amd64\.deb'
-	elif [ "$ARCH" == "aarch64" ]; then
-		IMAGE_URL="https://deb.debian.org/debian/pool/main/l/linux-signed-arm64/"
-		IMAGE_PATTERN='linux-image-[^"]+cloud-arm64_[^"]+_arm64\.deb'
-	else
-		echo "不支持的架构：$ARCH，仅支持 x86_64 和 aarch64"
-		exit 1
-	fi
-
-	echo "检测到架构 $ARCH，正在从官方源获取cloud内核版本..."
-
-	# 获取 cloud 内核 .deb 文件列表
-	local DEB_FILES_RAW=$(curl -s "$IMAGE_URL" | grep -oP "$IMAGE_PATTERN")
-
-	# 清空临时映射文件
-	>"$VERSION_MAP_FILE"
-
-	# 提取 image 版本号并写入映射文件
-	while IFS= read -r file; do
-		if [[ "$file" =~ linux-image-([0-9]+\.[0-9]+(\.[0-9]+)?(-[0-9]+)?) ]]; then
-			local ver="${BASH_REMATCH[1]}"
-			echo "$ver:$file" >>"$VERSION_MAP_FILE"
-		fi
-	done <<<"$DEB_FILES_RAW"
-
-	# 读取排序并去重后的版本号
-	mapfile -t VERSIONS < <(cut -d':' -f1 "$VERSION_MAP_FILE" | sort -V -u)
-
-	# 确保有可用版本
-	if [ ${#VERSIONS[@]} -eq 0 ]; then
-		echo "未找到可用的cloud内核版本，请检查网络或反馈。"
-		exit 1
-	fi
-
-	echo "检测到 $DISTRO 系统（架构 $ARCH），以下是从 Debian 签名cloud内核列表中获取的版本（按从小到大排序，已去重）："
-	for i in "${!VERSIONS[@]}"; do
-		echo "  $i) [${VERSIONS[$i]}]"
-	done
-
-	# 默认选择最新版本
-	local DEFAULT_INDEX=$((${#VERSIONS[@]} - 1))
-	echo "请选择要安装的cloud内核版本（10秒后默认选择最新版本回车加速 ${VERSIONS[$DEFAULT_INDEX]}，输入'h'则使用apt安装非最新cloud及headers）："
-	read -t 10 -p "输入选项编号或'h': " CHOICE
-
-	# 检查是否使用 apt 安装 cloud 及 headers
-	local USE_APT=false
-	if [[ "$CHOICE" =~ ^[hH]$ ]]; then
-		USE_APT=true
-		if [ "$DISTRO" != "debian" ]; then
-			echo "错误：使用 'h' 安装 headers 仅支持 Debian 系统，当前系统为 $DISTRO"
-			exit 1
-		fi
-		CHOICE=$DEFAULT_INDEX
-	else
-		CHOICE=${CHOICE:-$DEFAULT_INDEX}
-	fi
-
-	# 验证输入
-	if [[ ! "$CHOICE" =~ ^[0-9]+$ ]] || [ "$CHOICE" -lt 0 ] || [ "$CHOICE" -ge "${#VERSIONS[@]}" ]; then
-		echo "无效选项，默认安装最新版本 ${VERSIONS[$DEFAULT_INDEX]}..."
-		CHOICE=$DEFAULT_INDEX
-	fi
-
-	local SELECTED_VERSION="${VERSIONS[$CHOICE]}"
-	local IMAGE_DEB_FILE=$(grep "^$SELECTED_VERSION:" "$VERSION_MAP_FILE" | tail -n 1 | cut -d':' -f2)
-
-	kernel_version=$SELECTED_VERSION
-
-	# 如果选择 'h'，使用 apt 安装 cloud 内核及 headers
-	if [ "$USE_APT" = true ]; then
-		echo "正在使用 apt 安装 linux-image-cloud-${ARCH} 及 headers..."
-		sudo apt update
-		if [ "$ARCH" == "x86_64" ]; then
-			sudo apt install -y "linux-image-cloud-amd64" "linux-headers-cloud-amd64"
-		elif [ "$ARCH" == "aarch64" ]; then
-			sudo apt install -y "linux-image-cloud-arm64" "linux-headers-cloud-arm64"
-		fi
-	else
-		# 下载并安装 image
-		echo "正在下载 $IMAGE_URL$IMAGE_DEB_FILE ..."
-		curl -O "$IMAGE_URL$IMAGE_DEB_FILE"
-		echo "正在安装 $IMAGE_DEB_FILE ..."
-		sudo dpkg -i "$IMAGE_DEB_FILE"
-		sudo apt-get install -f -y # 解决可能的依赖问题
-	fi
-
-	# 清理下载的文件
-	rm -f "$IMAGE_DEB_FILE" "$VERSION_MAP_FILE"
-
-	BBR_grub
-	echo -e "${Tip} 内核安装完毕，当前默认模式为保留旧内核，仅切换默认启动项，请参考上面的信息检查是否安装成功"
-	check_kernel
-
 }
 
 #启用BBR+fq
@@ -1199,33 +801,6 @@ startbbrcake() {
 	echo -e "${Info}BBR+cake修改成功，重启生效！"
 }
 
-#启用BBRplus
-startbbrplus() {
-	remove_bbr_lotserver
-	echo "net.core.default_qdisc=fq" >>/etc/sysctl.d/99-sysctl.conf
-	echo "net.ipv4.tcp_congestion_control=bbrplus" >>/etc/sysctl.d/99-sysctl.conf
-	sysctl --system
-	echo -e "${Info}BBRplus修改成功，重启生效！"
-}
-
-#启用Lotserver
-startlotserver() {
-	remove_bbr_lotserver
-	if [[ "${OS_type}" == "CentOS" ]]; then
-		yum install ethtool -y
-	else
-		apt-get update || apt-get --allow-releaseinfo-change update
-		apt-get install ethtool -y
-	fi
-	echo | bash <(wget --no-check-certificate -qO- https://raw.githubusercontent.com/torr9522/Linux-NetSpeed/tcpx.sh/selfhost/lotServerInstall.sh) install
-	sed -i '/advinacc/d' /appex/etc/config
-	sed -i '/maxmode/d' /appex/etc/config
-	echo -e "advinacc=\"1\"
-maxmode=\"1\"" >>/appex/etc/config
-	/appex/bin/lotServer.sh restart
-	start_menu
-}
-
 #启用BBR2+FQ
 startbbr2fq() {
 	remove_bbr_lotserver
@@ -1251,46 +826,6 @@ startbbr2cake() {
 	echo "net.ipv4.tcp_congestion_control=bbr" >>/etc/sysctl.d/99-sysctl.conf
 	sysctl --system
 	echo -e "${Info}BBR3修改成功，重启生效！"
-}
-
-#开启ecn
-startecn() {
-	sed -i '/net.ipv4.tcp_ecn/d' /etc/sysctl.d/99-sysctl.conf
-	sed -i '/net.ipv4.tcp_ecn/d' /etc/sysctl.conf
-
-	echo "net.ipv4.tcp_ecn=1" >>/etc/sysctl.d/99-sysctl.conf
-	sysctl --system
-	echo -e "${Info}开启ecn结束！"
-}
-
-#关闭ecn
-closeecn() {
-	sed -i '/net.ipv4.tcp_ecn/d' /etc/sysctl.d/99-sysctl.conf
-	sed -i '/net.ipv4.tcp_ecn/d' /etc/sysctl.conf
-
-	echo "net.ipv4.tcp_ecn=0" >>/etc/sysctl.d/99-sysctl.conf
-	sysctl --system
-	echo -e "${Info}关闭ecn结束！"
-}
-
-#编译安装brutal
-startbrutal() {
-	# 如果 headers_status 为 "已匹配headers"，执行外部脚本
-	if [[ "$headers_status" == "已匹配" ]]; then
-		echo "Headers 已匹配，开始编译..."
-		bash <(curl -fsSL https://raw.githubusercontent.com/torr9522/Linux-NetSpeed/tcpx.sh/selfhost/hy2.sh)
-		# 检查 brutal 模块是否加载
-		if lsmod | grep -q "brutal"; then
-			echo "brutal 模块已加载，请重新运行脚本查看状态"
-			exit 0 # 成功退出
-		else
-			echo "brutal 模块未加载，可能编译安装失败"
-			exit 1 # 失败退出
-		fi
-	else
-		echo "当前内核headers不匹配或者没有安装"
-		exit 1
-	fi
 }
 
 #卸载bbr+锐速
@@ -1390,67 +925,11 @@ remove_all() {
 	sleep 1s
 }
 
-optimizing_ddcc() {
-	sed -i '/net.ipv4.conf.all.rp_filter/d' /etc/sysctl.d/99-sysctl.conf
-	sed -i '/net.ipv4.tcp_syncookies/d' /etc/sysctl.d/99-sysctl.conf
-	sed -i '/net.ipv4.tcp_max_syn_backlog/d' /etc/sysctl.d/99-sysctl.conf
-
-	echo "net.ipv4.conf.all.rp_filter = 1" >>/etc/sysctl.d/99-sysctl.conf
-	echo "net.ipv4.tcp_syncookies = 1" >>/etc/sysctl.d/99-sysctl.conf
-	echo "net.ipv4.tcp_max_syn_backlog = 1024" >>/etc/sysctl.d/99-sysctl.conf
-	sysctl -p
-	sysctl --system
-}
-
-#更新脚本
-Update_Shell() {
-	local shell_file
-	shell_file="$(readlink -f "$0")"
-	local shell_url="https://raw.githubusercontent.com/torr9522/Linux-NetSpeed/tcpx.sh/tcpx.sh"
-
-	# 下载最新版本的脚本
-	wget -O "/tmp/tcpx.sh" "$(check_cn $shell_url)" &>/dev/null
-
-	# 比较本地和远程脚本的 md5 值
-	local md5_local
-	local md5_remote
-	md5_local="$(md5sum "$shell_file" | awk '{print $1}')"
-	md5_remote="$(md5sum /tmp/tcpx.sh | awk '{print $1}')"
-
-	if [ "$md5_local" != "$md5_remote" ]; then
-		# 替换本地脚本文件
-		cp "/tmp/tcpx.sh" "$shell_file"
-		chmod +x "$shell_file"
-
-		echo "脚本已更新，请重新运行。"
-		exit 0
-	else
-		echo "脚本是最新版本，无需更新。"
-	fi
-}
-
-run_local_or_remote_script() {
-	local remote_url="$1"
-	shift
-	local script_dir
-	local candidate
-	script_dir="$(cd -- "$(dirname -- "$(readlink -f "${BASH_SOURCE[0]}")")" >/dev/null 2>&1 && pwd -P)"
-
-	for candidate in "$@"; do
-		if [[ -f "${script_dir}/${candidate}" ]]; then
-			bash "${script_dir}/${candidate}"
-			return $?
-		fi
-	done
-
-	bash <(wget -qO- "$remote_url")
-}
-
 #切换到卸载内核版本
 gototcp() {
 	clear
 	run_local_or_remote_script \
-		"https://raw.githubusercontent.com/torr9522/Linux-NetSpeed/tcp.sh/tcp.sh" \
+		"${PEER_SCRIPT_REMOTE_URL}" \
 		"tcp.sh" \
 		"../Linux-NetSpeed-tcp/tcp.sh"
 }
@@ -1518,20 +997,23 @@ net.ipv6.conf.default.accept_ra = 2" >>/etc/sysctl.d/99-sysctl.conf
 #开始菜单
 start_menu() {
 	clear
-	echo && echo -e " TCP加速 一键安装管理脚本 ${Red_font_prefix}[v${sh_ver}] 默认保留旧内核，仅切换启动项${Font_color_suffix} from blog.ylx.me 母鸡慎用
+	echo && echo -e "TCP加速 一键安装管理脚本 ${Red_font_prefix}[v${sh_ver%-local}] ${KERNEL_MODE_BANNER}${Font_color_suffix}  母鸡慎用
+${Green_font_prefix}0.${Font_color_suffix} 切换到卸载内核版本
+${Green_font_prefix}18.${Font_color_suffix} 切换到一键DD系统脚本
+${Green_font_prefix}19.${Font_color_suffix} 切换到检查当前IP质量/媒体解锁/邮箱通信脚本
  ———————————————————————————— 内核安装 —————————————————————————————
- ${Green_font_prefix}1.${Font_color_suffix} 安装 BBR原版内核          ${Green_font_prefix}2.${Font_color_suffix} XanMod Kernel (支持 BBR3)
+ ${Green_font_prefix}1.${Font_color_suffix} 安装 BBR原版内核              ${Green_font_prefix}2.${Font_color_suffix} XanMod Kernel（支持 BBR3）
  ———————————————————————————— 加速启用 —————————————————————————————
- ${Green_font_prefix}11.${Font_color_suffix} 使用BBR+FQ加速           ${Green_font_prefix}12.${Font_color_suffix} 使用BBR+FQ_PIE加速 
- ${Green_font_prefix}13.${Font_color_suffix} 使用BBR+CAKE加速         ${Green_font_prefix}14.${Font_color_suffix} 使用BBR3+FQ加速
- ${Green_font_prefix}15.${Font_color_suffix} 使用BBR3+FQ_PIE加速      ${Green_font_prefix}16.${Font_color_suffix} 使用BBR3+CAKE加速
+ ${Green_font_prefix}3.${Font_color_suffix} 使用BBR+FQ加速                       ${Green_font_prefix}6.${Font_color_suffix} 使用BBR3+FQ加速
+ ${Green_font_prefix}4.${Font_color_suffix} 使用BBR+FQ_PIE加速                 ${Green_font_prefix}7.${Font_color_suffix} 使用BBR3+FQ_PIE加速
+ ${Green_font_prefix}5.${Font_color_suffix} 使用BBR+CAKE加速                   ${Green_font_prefix}8.${Font_color_suffix} 使用BBR3+CAKE加速
  ———————————————————————————— 系统配置 —————————————————————————————
- ${Green_font_prefix}21.${Font_color_suffix} 系统配置优化旧           ${Green_font_prefix}22.${Font_color_suffix} 系统配置优化新
- ${Green_font_prefix}23.${Font_color_suffix} 禁用IPv6                 ${Green_font_prefix}24.${Font_color_suffix} 开启IPv6
- ${Green_font_prefix}61.${Font_color_suffix} 手动提交合并内核参数     ${Green_font_prefix}62.${Font_color_suffix} 手动编辑内核参数
+${Green_font_prefix}9.${Font_color_suffix} 系统配置优化旧                ${Green_font_prefix}10.${Font_color_suffix} 系统配置优化新
+${Green_font_prefix}11.${Font_color_suffix} 禁用IPv6                        ${Green_font_prefix}12.${Font_color_suffix} 开启IPv6
+${Green_font_prefix}13.${Font_color_suffix} 手动提交合并内核参数     ${Green_font_prefix}14.${Font_color_suffix} 手动编辑内核参数
  ———————————————————————————— 内核管理 —————————————————————————————
- ${Green_font_prefix}51.${Font_color_suffix} 查看排序内核             ${Green_font_prefix}52.${Font_color_suffix} 删除保留指定内核
- ${Green_font_prefix}25.${Font_color_suffix} 卸载全部加速             ${Green_font_prefix}99.${Font_color_suffix} 退出脚本 
+${Green_font_prefix}15.${Font_color_suffix} 查看排序内核             ${Green_font_prefix}16.${Font_color_suffix} 删除保留指定内核
+${Green_font_prefix}17.${Font_color_suffix} 卸载全部加速             ${Green_font_prefix}99.${Font_color_suffix} 退出脚本
 ————————————————————————————————————————————————————————————————" &&
 		check_status
 	get_system_info
@@ -1546,116 +1028,65 @@ start_menu() {
 
 	read -p " 请输入数字 :" num
 	case "$num" in
-		0)
-			Update_Shell
-			;;
-		1)
-			run_menu_action_with_auto_reboot 1 check_sys_bbr
-			;;
-		2)
-			run_menu_action_with_auto_reboot 2 check_sys_official_xanmod_main
-			;;
-	3)
-		check_sys_Lotsever
-		;;
-	5)
-		check_sys_bbrplusnew
-		;;
-	7)
-		check_sys_official_zen
-		;;
-	8)
-		check_sys_cloud
-		;;
-	30)
-		check_sys_official
-		;;
-	31)
-		check_sys_official_bbr
-		;;
-	32)
-		check_sys_official_xanmod_main
-		;;
-	33)
-		check_sys_official_xanmod_lts
-		;;
-	36)
-		check_sys_official_xanmod_edge
-		;;
-	37)
-		check_sys_official_xanmod_rt
-		;;
-	9)
+	0)
 		gototcp
 		;;
+	1)
+		check_sys_bbr
+		;;
+	2)
+		check_sys_xanmod_main_kept
+		;;
+	3)
+		startbbrfq
+		;;
+	4)
+		startbbrfqpie
+		;;
+	5)
+		startbbrcake
+		;;
+	6)
+		startbbr2fq
+		;;
+	7)
+		startbbr2fqpie
+		;;
+	8)
+		startbbr2cake
+		;;
+	9)
+		optimizing_system_old
+		;;
 	10)
-		gotodd
+		optimizing_system_johnrosen1
 		;;
-	60)
-		gotoipcheck
-		;;
-		11)
-			run_menu_action_with_auto_reboot 11 startbbrfq
-			;;
-		12)
-			run_menu_action_with_auto_reboot 12 startbbrfqpie
-			;;
-		13)
-			run_menu_action_with_auto_reboot 13 startbbrcake
-			;;
-		14)
-			run_menu_action_with_auto_reboot 14 startbbr2fq
-			;;
-		15)
-			run_menu_action_with_auto_reboot 15 startbbr2fqpie
-			;;
-		16)
-			run_menu_action_with_auto_reboot 16 startbbr2cake
-			;;
-	17)
-		startecn
-		;;
-	18)
-		closeecn
-		;;
-	19)
-		startbbrplus
-		;;
-	20)
-		startlotserver
-		;;
-		21)
-			run_menu_action_with_auto_reboot 21 optimizing_system_old
-			;;
-		22)
-			run_menu_action_with_auto_reboot 22 optimizing_system_johnrosen1
-			;;
-	23)
+	11)
 		closeipv6
 		;;
-	24)
+	12)
 		openipv6
 		;;
-	25)
-		remove_all
-		;;
-	26)
-		optimizing_ddcc
-		;;
-	28)
-		startbrutal
-		;;
-	51)
-		BBR_grub
-		;;
-	52)
-		detele_kernel_custom
-		;;
-	61)
+	13)
 		update_sysctl_interactive
 		;;
-	62)
+	14)
 		edit_sysctl_interactive
+		;;
+	15)
+		BBR_grub
+		;;
+	16)
+		detele_kernel_custom
+		;;
+	17)
+		remove_all
+		;;
+	18)
+		gotodd
+		;;
+	19)
+		gotoipcheck
 		;;
 	99)
 		exit 1
@@ -1672,86 +1103,80 @@ start_menu() {
 
 #删除多余内核
 detele_kernel() {
-	if [[ "${FORCE_KERNEL_DELETE}" != "1" && "${AUTO_CLEAN_OLD_KERNELS}" != "1" ]]; then
-		echo -e "${Info} 已启用保留旧内核模式，跳过自动卸载 image 内核。"
+	local kernels=()
+	local pkg=""
+
+	if [[ "${AUTO_CLEAN_OLD_KERNELS}" != "1" ]]; then
+		echo -e "${Info} 当前模式保留旧 image 内核，跳过清理。"
 		return 0
 	fi
+
 	if [[ "${OS_type}" == "CentOS" ]]; then
-		rpm_total=$(rpm -qa | grep kernel | grep -v "${kernel_version}" | grep -v "noarch" | wc -l)
-		if (( rpm_total > 0 )); then
-			echo -e "检测到 ${rpm_total} 个其余内核，开始卸载..."
-			for ((integer = 1; integer <= ${rpm_total}; integer++)); do
-				rpm_del=$(rpm -qa | grep kernel | grep -v "${kernel_version}" | grep -v "noarch" | sed -n "${integer}p")
-				echo -e "开始卸载 ${rpm_del} 内核..."
-				rpm --nodeps -e "${rpm_del}"
-				echo -e "卸载 ${rpm_del} 内核卸载完成，继续..."
-			done
-			echo --nodeps -e "内核卸载完毕，继续..."
-		else
-			echo -e "${Info} 未检测到需要自动卸载的 image 内核。"
-		fi
+		mapfile -t kernels < <(rpm -qa | grep '^kernel' | grep -v "${kernel_version}" | grep -v 'noarch' || true)
 	elif [[ "${OS_type}" == "Debian" ]]; then
-		deb_total=$(dpkg -l | grep linux-image | awk '{print $2}' | grep -v "${kernel_version}" | wc -l)
-		if (( deb_total > 0 )); then
-			echo -e "检测到 ${deb_total} 个其余内核，开始卸载..."
-			for ((integer = 1; integer <= ${deb_total}; integer++)); do
-				deb_del=$(dpkg -l | grep linux-image | awk '{print $2}' | grep -v "${kernel_version}" | sed -n "${integer}p")
-				echo -e "开始卸载 ${deb_del} 内核..."
-				apt-get purge -y "${deb_del}"
-				apt-get autoremove -y
-				echo -e "卸载 ${deb_del} 内核卸载完成，继续..."
-			done
-			echo -e "内核卸载完毕，继续..."
-		else
-			echo -e "${Info} 未检测到需要自动卸载的 image 内核。"
-		fi
+		mapfile -t kernels < <(dpkg -l | awk '/^ii/ {print $2}' | grep '^linux-image' | grep -v "${kernel_version}" || true)
 	fi
+
+	if (( ${#kernels[@]} == 0 )); then
+		echo -e "${Info} 未检测到需要卸载的旧 image 内核。"
+		return 0
+	fi
+
+	echo -e "${Info} 检测到 ${#kernels[@]} 个其余内核，开始卸载..."
+	for pkg in "${kernels[@]}"; do
+		echo -e "${Info} 开始卸载 ${pkg} 内核..."
+		if [[ "${OS_type}" == "CentOS" ]]; then
+			rpm --nodeps -e "${pkg}"
+		else
+			apt-get purge -y "${pkg}"
+			apt-get autoremove -y
+		fi
+		echo -e "${Info} 卸载 ${pkg} 内核完成，继续..."
+	done
+
+	echo -e "${Info} 内核卸载完毕，继续..."
 }
 
 detele_kernel_head() {
-	if [[ "${FORCE_KERNEL_DELETE}" != "1" && "${AUTO_CLEAN_OLD_KERNELS}" != "1" ]]; then
-		echo -e "${Info} 已启用保留旧内核模式，跳过自动卸载 headers 内核。"
+	local kernels=()
+	local pkg=""
+
+	if [[ "${AUTO_CLEAN_OLD_KERNELS}" != "1" ]]; then
+		echo -e "${Info} 当前模式保留旧 headers 内核，跳过清理。"
 		return 0
 	fi
+
 	if [[ "${OS_type}" == "CentOS" ]]; then
-		rpm_total=$(rpm -qa | grep kernel-headers | grep -v "${kernel_version}" | grep -v "noarch" | wc -l)
-		if (( rpm_total > 0 )); then
-			echo -e "检测到 ${rpm_total} 个其余head内核，开始卸载..."
-			for ((integer = 1; integer <= ${rpm_total}; integer++)); do
-				rpm_del=$(rpm -qa | grep kernel-headers | grep -v "${kernel_version}" | grep -v "noarch" | sed -n "${integer}p")
-				echo -e "开始卸载 ${rpm_del} headers内核..."
-				rpm --nodeps -e "${rpm_del}"
-				echo -e "卸载 ${rpm_del} 内核卸载完成，继续..."
-			done
-			echo --nodeps -e "内核卸载完毕，继续..."
-		else
-			echo -e "${Info} 未检测到需要自动卸载的 headers 内核。"
-		fi
+		mapfile -t kernels < <(rpm -qa | grep '^kernel-headers' | grep -v "${kernel_version}" | grep -v 'noarch' || true)
 	elif [[ "${OS_type}" == "Debian" ]]; then
-		deb_total=$(dpkg -l | grep linux-headers | awk '{print $2}' | grep -v "${kernel_version}" | wc -l)
-		if (( deb_total > 0 )); then
-			echo -e "检测到 ${deb_total} 个其余head内核，开始卸载..."
-			for ((integer = 1; integer <= ${deb_total}; integer++)); do
-				deb_del=$(dpkg -l | grep linux-headers | awk '{print $2}' | grep -v "${kernel_version}" | sed -n "${integer}p")
-				echo -e "开始卸载 ${deb_del} headers内核..."
-				apt-get purge -y "${deb_del}"
-				apt-get autoremove -y
-				echo -e "卸载 ${deb_del} 内核卸载完成，继续..."
-			done
-			echo -e "内核卸载完毕，继续..."
-		else
-			echo -e "${Info} 未检测到需要自动卸载的 headers 内核。"
-		fi
+		mapfile -t kernels < <(dpkg -l | awk '/^ii/ {print $2}' | grep '^linux-headers' | grep -v "${kernel_version}" || true)
 	fi
+
+	if (( ${#kernels[@]} == 0 )); then
+		echo -e "${Info} 未检测到需要卸载的旧 headers 内核。"
+		return 0
+	fi
+
+	echo -e "${Info} 检测到 ${#kernels[@]} 个其余 headers 内核，开始卸载..."
+	for pkg in "${kernels[@]}"; do
+		echo -e "${Info} 开始卸载 ${pkg} headers 内核..."
+		if [[ "${OS_type}" == "CentOS" ]]; then
+			rpm --nodeps -e "${pkg}"
+		else
+			apt-get purge -y "${pkg}"
+			apt-get autoremove -y
+		fi
+		echo -e "${Info} 卸载 ${pkg} headers 内核完成，继续..."
+	done
+
+	echo -e "${Info} headers 内核卸载完毕，继续..."
 }
 
 detele_kernel_custom() {
 	BBR_grub
 	read -p " 查看上面内核输入需保留保留保留的内核关键词(如:5.15.0-11) :" kernel_version
-	FORCE_KERNEL_DELETE=1
 	detele_kernel
 	detele_kernel_head
-	FORCE_KERNEL_DELETE=0
 	BBR_grub
 }
 
@@ -2112,7 +1537,7 @@ set_debian_grub_default_kernel() {
 #简单的检查内核
 check_kernel() {
 	if [[ -z "$(find /boot -type f -name 'vmlinuz-*' ! -name 'vmlinuz-*rescue*')" ]]; then
-		echo -e "\033[0;31m警告: 未发现内核文件，请勿重启系统，不卸载内核版本选择30安装默认内核救急！\033[0m"
+		echo -e "\033[0;31m警告: 未发现可用内核文件，请勿重启系统，可先使用菜单 30 安装默认内核救急！\033[0m"
 	else
 		echo -e "\033[0;32m发现内核文件，看起来可以重启。\033[0m"
 	fi
@@ -2379,23 +1804,6 @@ check_sys_bbrplus() {
 	fi
 }
 
-check_sys_bbrplusnew() {
-	check_version
-	if [[ "${OS_type}" == "CentOS" ]]; then
-		#if [[ ${version} == "7" ]]; then
-		if [[ ${version} == "7" || ${version} == "8" ]]; then
-			installbbrplusnew
-		else
-			echo -e "${Error} BBRplusNew内核不支持当前系统 ${release} ${version} ${bit} !" && exit 1
-		fi
-	elif [[ "${OS_type}" == "Debian" ]]; then
-		apt-get --fix-broken install -y && apt-get autoremove -y
-		installbbrplusnew
-	else
-		echo -e "${Error} BBRplusNew内核不支持当前系统 ${release} ${version} ${bit} !" && exit 1
-	fi
-}
-
 check_sys_xanmod() {
 	check_version
 	if [[ "${OS_type}" == "CentOS" ]]; then
@@ -2412,176 +1820,14 @@ check_sys_xanmod() {
 	fi
 }
 
-check_sys_cloud() {
-	check_version
-	if [[ "${OS_type}" == "Debian" ]]; then
-		apt-get --fix-broken install -y && apt-get autoremove -y
-		installcloud
-	else
-		echo -e "${Error} cloud内核不支持当前系统 ${release} ${version} ${bit} !" && exit 1
-	fi
-}
-
-#检查安装Lotsever的系统要求
-check_sys_Lotsever() {
-	check_version
-	bit=$(uname -m)
-	if [[ ${bit} != "x86_64" ]]; then
-		echo -e "${Error} 不支持x86_64以外的系统 !" && exit 1
-	fi
-	if [[ "${OS_type}" == "CentOS" ]]; then
-		if [[ ${version} == "6" ]]; then
-			kernel_version="2.6.32-504"
-			installlot
-		elif [[ ${version} == "7" ]]; then
-			yum -y install net-tools
-			kernel_version="4.11.2-1"
-			installlot
-		else
-			echo -e "${Error} Lotsever不支持当前系统 ${release} ${version} ${bit} !" && exit 1
-		fi
-	elif [[ "${release}" == "debian" ]]; then
-		if [[ ${version} == "7" || ${version} == "8" ]]; then
-			if [[ ${bit} == "x86_64" ]]; then
-				kernel_version="3.16.0-4"
-				installlot
-			elif [[ ${bit} == "i386" ]]; then
-				kernel_version="3.2.0-4"
-				installlot
-			fi
-		elif [[ ${version} == "9" ]]; then
-			if [[ ${bit} == "x86_64" ]]; then
-				kernel_version="4.9.0-4"
-				installlot
-			fi
-		else
-			echo -e "${Error} Lotsever不支持当前系统 ${release} ${version} ${bit} !" && exit 1
-		fi
-	elif [[ "${release}" == "ubuntu" ]]; then
-		if [[ ${version} -ge "12" ]]; then
-			if [[ ${bit} == "x86_64" ]]; then
-				kernel_version="4.4.0-47"
-				installlot
-			elif [[ ${bit} == "i386" ]]; then
-				kernel_version="3.13.0-29"
-				installlot
-			fi
-		else
-			echo -e "${Error} Lotsever不支持当前系统 ${release} ${version} ${bit} !" && exit 1
-		fi
-	else
-		echo -e "${Error} Lotsever不支持当前系统 ${release} ${version} ${bit} !" && exit 1
-	fi
-}
-
-#检查官方稳定内核并安装
-check_sys_official() {
-	check_version
-	bit=$(uname -m)
-	if [[ "${OS_type}" == "CentOS" ]]; then
-		if [[ ${bit} != "x86_64" ]]; then
-			echo -e "${Error} 不支持x86_64以外的系统 !" && exit 1
-		fi
-		if [[ ${version} == "7" ]]; then
-			yum install kernel kernel-headers -y --skip-broken
-		elif [[ ${version} == "8" ]]; then
-			yum install kernel kernel-core kernel-headers -y --skip-broken
-		else
-			echo -e "${Error} 不支持当前系统 ${release} ${version} ${bit} !" && exit 1
-		fi
-	elif [[ "${release}" == "debian" ]]; then
-		apt update
-		if [[ ${bit} == "x86_64" ]]; then
-			apt-get update && apt-get install linux-image-amd64 linux-headers-amd64 -y
-		elif [[ ${bit} == "aarch64" ]]; then
-			apt-get install linux-image-arm64 linux-headers-arm64 -y
-		fi
-	elif [[ "${release}" == "ubuntu" ]]; then
-		apt update
-		apt-get install linux-image-generic linux-headers-generic -y
-	else
-		echo -e "${Error} 不支持当前系统 ${release} ${version} ${bit} !" && exit 1
-	fi
-
-	BBR_grub
-	echo -e "${Tip} 内核安装完毕，当前默认模式为保留旧内核，仅切换默认启动项，请参考上面的信息检查是否安装成功"
-}
-
-#检查官方最新内核并安装
-check_sys_official_bbr() {
-	check_version
-	os_name=$(awk -F= '/^NAME/{print $2}' /etc/os-release | tr -d '"')
-	os_version=$(awk -F= '/^VERSION_ID/{print $2}' /etc/os-release | tr -d '"')
-	os_arch=$(uname -m)
-	bit=$(uname -m)
-	if [[ "${OS_type}" == "CentOS" ]]; then
-		if [[ ${bit} != "x86_64" ]]; then
-			echo -e "${Error} 不支持x86_64以外的系统 !" && exit 1
-		fi
-		rpm --import https://www.elrepo.org/RPM-GPG-KEY-elrepo.org
-		if [[ ${version} == "7" ]]; then
-			yum install https://www.elrepo.org/elrepo-release-7.el7.elrepo.noarch.rpm -y
-			yum --enablerepo=elrepo-kernel install kernel-ml kernel-ml-headers -y --skip-broken
-		elif [[ ${version} == "8" ]]; then
-			yum install https://www.elrepo.org/elrepo-release-8.el8.elrepo.noarch.rpm -y
-			yum --enablerepo=elrepo-kernel install kernel-ml kernel-ml-headers -y --skip-broken
-		else
-			echo -e "${Error} 不支持当前系统 ${release} ${version} ${bit} !" && exit 1
-		fi
-	elif [[ "${release}" == "debian" ]]; then
-		case ${os_version} in
-		9)
-			echo "deb http://deb.debian.org/debian stretch-backports main" >/etc/apt/sources.list.d/stretch-backports.list
-			;;
-		10)
-			echo "deb http://deb.debian.org/debian buster-backports main" >/etc/apt/sources.list.d/buster-backports.list
-			;;
-		11)
-			echo "deb http://deb.debian.org/debian bullseye-backports main" >/etc/apt/sources.list.d/bullseye-backports.list
-			;;
-		12)
-			echo "deb http://deb.debian.org/debian bookworm-backports main" >/etc/apt/sources.list.d/bookworm-backports.list
-			;;
-		13)
-			echo "deb http://deb.debian.org/debian trixie-backports main" >/etc/apt/sources.list.d/trixie-backports.list
-			;;
-		*)
-			echo -e "[Error] 不支持当前系统 ${os_name} ${os_version} ${os_arch} !" && exit 1
-			;;
-		esac
-
-		apt update
-		if [[ ${os_arch} == "x86_64" ]]; then
-			apt -t "$(lsb_release -cs)-backports" install \
-				linux-image-amd64 \
-				linux-headers-amd64 \
-				-y
-		elif [[ ${os_arch} =~ ^(arm|aarch64)$ ]]; then
-			apt -t "$(lsb_release -cs)-backports" install \
-				linux-image-arm64 \
-				linux-headers-arm64 \
-				-y
-		else
-			echo -e "[Error] 不支持当前系统架构 ${os_arch} !" && exit 1
-		fi
-	elif [[ "${release}" == "ubuntu" ]]; then
-		echo -e "${Error} ubuntu不会写，你来吧" && exit 1
-	else
-		echo -e "${Error} 不支持当前系统 ${release} ${version} ${bit} !" && exit 1
-	fi
-
-	BBR_grub
-	echo -e "${Tip} 内核安装完毕，当前默认模式为保留旧内核，仅切换默认启动项，请参考上面的信息检查是否安装成功"
-}
-
-#检查官方xanmod main内核并安装
-check_sys_official_xanmod_main() {
+#检查保留的xanmod main内核并安装
+check_sys_xanmod_main_kept() {
 	check_version
 	wget -O check_x86-64_psabi.sh https://dl.xanmod.org/check_x86-64_psabi.sh
 	chmod +x check_x86-64_psabi.sh
 	cpu_level=$(./check_x86-64_psabi.sh | awk -F 'v' '{print $2}')
 	echo -e "CPU supports \033[32m${cpu_level}\033[0m"
-	# exit
+
 	if [[ ${bit} != "x86_64" ]]; then
 		echo -e "${Error} 不支持x86_64以外的系统 !" && exit 1
 	fi
@@ -2591,10 +1837,7 @@ check_sys_official_xanmod_main() {
 		apt-get install gnupg ca-certificates wget -y
 		wget -qO- https://dl.xanmod.org/archive.key | gpg --batch --yes --dearmor -o /usr/share/keyrings/xanmod-archive-keyring.gpg
 		echo 'deb [signed-by=/usr/share/keyrings/xanmod-archive-keyring.gpg] http://deb.xanmod.org releases main' >/etc/apt/sources.list.d/xanmod-kernel.list
-		if [[ "${cpu_level}" == "4" ]]; then
-			apt update && apt install linux-xanmod-x64v3 -y
-			kernel_version=$(apt-cache show linux-xanmod-x64v3 2>/dev/null | awk -F'[:, ]+' '/^Depends: / {for (i = 1; i <= NF; i++) if ($i ~ /^linux-image-/) {sub(/^linux-image-/, "", $i); print $i; exit}}')
-		elif [[ "${cpu_level}" == "3" ]]; then
+		if [[ "${cpu_level}" == "4" || "${cpu_level}" == "3" ]]; then
 			apt update && apt install linux-xanmod-x64v3 -y
 			kernel_version=$(apt-cache show linux-xanmod-x64v3 2>/dev/null | awk -F'[:, ]+' '/^Depends: / {for (i = 1; i <= NF; i++) if ($i ~ /^linux-image-/) {sub(/^linux-image-/, "", $i); print $i; exit}}')
 		elif [[ "${cpu_level}" == "2" ]]; then
@@ -2604,159 +1847,13 @@ check_sys_official_xanmod_main() {
 			apt update && apt install linux-xanmod-x64v1 -y
 			kernel_version=$(apt-cache show linux-xanmod-x64v1 2>/dev/null | awk -F'[:, ]+' '/^Depends: / {for (i = 1; i <= NF; i++) if ($i ~ /^linux-image-/) {sub(/^linux-image-/, "", $i); print $i; exit}}')
 		fi
-		check_empty "${kernel_version}"
+		check_empty "$kernel_version"
 	else
 		echo -e "${Error} 不支持当前系统 ${release} ${version} ${bit} !" && exit 1
 	fi
 
 	BBR_grub
-	echo -e "${Tip} 内核安装完毕，当前默认模式为保留旧内核，仅切换默认启动项，请参考上面的信息检查是否安装成功"
-}
-
-#检查官方xanmod lts内核并安装
-check_sys_official_xanmod_lts() {
-	check_version
-	wget -O check_x86-64_psabi.sh https://dl.xanmod.org/check_x86-64_psabi.sh
-	chmod +x check_x86-64_psabi.sh
-	cpu_level=$(./check_x86-64_psabi.sh | awk -F 'v' '{print $2}')
-	echo -e "CPU supports \033[32m${cpu_level}\033[0m"
-	# exit
-	if [[ ${bit} != "x86_64" ]]; then
-		echo -e "${Error} 不支持x86_64以外的系统 !" && exit 1
-	fi
-
-	if [[ "${OS_type}" == "Debian" ]]; then
-		apt update
-		apt-get install gnupg gnupg2 gnupg1 -y
-		echo 'deb http://deb.xanmod.org releases main' >/etc/apt/sources.list.d/xanmod-kernel.list
-		# --[ 已修改 ]-- 使用 gpg --dearmor 替换 apt-key
-		wget -qO - https://dl.xanmod.org/gpg.key | gpg --batch --yes --dearmor -o /etc/apt/trusted.gpg.d/xanmod-kernel.gpg
-		if [[ "${cpu_level}" == "4" ]]; then
-			apt update && apt install linux-xanmod-lts-x64v3 -y
-			kernel_version=$(apt-cache show linux-xanmod-lts-x64v3 2>/dev/null | awk -F'[:, ]+' '/^Depends: / {for (i = 1; i <= NF; i++) if ($i ~ /^linux-image-/) {sub(/^linux-image-/, "", $i); print $i; exit}}')
-		elif [[ "${cpu_level}" == "3" ]]; then
-			apt update && apt install linux-xanmod-lts-x64v3 -y
-			kernel_version=$(apt-cache show linux-xanmod-lts-x64v3 2>/dev/null | awk -F'[:, ]+' '/^Depends: / {for (i = 1; i <= NF; i++) if ($i ~ /^linux-image-/) {sub(/^linux-image-/, "", $i); print $i; exit}}')
-		elif [[ "${cpu_level}" == "2" ]]; then
-			apt update && apt install linux-xanmod-lts-x64v2 -y
-			kernel_version=$(apt-cache show linux-xanmod-lts-x64v2 2>/dev/null | awk -F'[:, ]+' '/^Depends: / {for (i = 1; i <= NF; i++) if ($i ~ /^linux-image-/) {sub(/^linux-image-/, "", $i); print $i; exit}}')
-		else
-			apt update && apt install linux-xanmod-lts-x64v1 -y
-			kernel_version=$(apt-cache show linux-xanmod-lts-x64v1 2>/dev/null | awk -F'[:, ]+' '/^Depends: / {for (i = 1; i <= NF; i++) if ($i ~ /^linux-image-/) {sub(/^linux-image-/, "", $i); print $i; exit}}')
-		fi
-		check_empty "${kernel_version}"
-	else
-		echo -e "${Error} 不支持当前系统 ${release} ${version} ${bit} !" && exit 1
-	fi
-
-	BBR_grub
-	echo -e "${Tip} 内核安装完毕，当前默认模式为保留旧内核，仅切换默认启动项，请参考上面的信息检查是否安装成功"
-}
-
-#检查官方xanmod edge内核并安装
-check_sys_official_xanmod_edge() {
-	check_version
-	wget -O check_x86-64_psabi.sh https://dl.xanmod.org/check_x86-64_psabi.sh
-	chmod +x check_x86-64_psabi.sh
-	cpu_level=$(./check_x86-64_psabi.sh | awk -F 'v' '{print $2}')
-	echo -e "CPU supports \033[32m${cpu_level}\033[0m"
-	# exit
-	if [[ ${bit} != "x86_64" ]]; then
-		echo -e "${Error} 不支持x86_64以外的系统 !" && exit 1
-	fi
-
-	if [[ "${OS_type}" == "Debian" ]]; then
-		apt update
-		apt-get install gnupg gnupg2 gnupg1 -y
-		echo 'deb http://deb.xanmod.org releases main' >/etc/apt/sources.list.d/xanmod-kernel.list
-		# --[ 已修改 ]-- 使用 gpg --dearmor 替换 apt-key
-		wget -qO - https://dl.xanmod.org/gpg.key | gpg --batch --yes --dearmor -o /etc/apt/trusted.gpg.d/xanmod-kernel.gpg
-		if [[ "${cpu_level}" == "4" ]]; then
-			apt update && apt install linux-xanmod-edge-x64v3 -y
-			kernel_version=$(apt-cache show linux-xanmod-edge-x64v3 2>/dev/null | awk -F'[:, ]+' '/^Depends: / {for (i = 1; i <= NF; i++) if ($i ~ /^linux-image-/) {sub(/^linux-image-/, "", $i); print $i; exit}}')
-		elif [[ "${cpu_level}" == "3" ]]; then
-			apt update && apt install linux-xanmod-edge-x64v3 -y
-			kernel_version=$(apt-cache show linux-xanmod-edge-x64v3 2>/dev/null | awk -F'[:, ]+' '/^Depends: / {for (i = 1; i <= NF; i++) if ($i ~ /^linux-image-/) {sub(/^linux-image-/, "", $i); print $i; exit}}')
-		elif [[ "${cpu_level}" == "2" ]]; then
-			apt update && apt install linux-xanmod-edge-x64v2 -y
-			kernel_version=$(apt-cache show linux-xanmod-edge-x64v2 2>/dev/null | awk -F'[:, ]+' '/^Depends: / {for (i = 1; i <= NF; i++) if ($i ~ /^linux-image-/) {sub(/^linux-image-/, "", $i); print $i; exit}}')
-		else
-			apt update && apt install linux-xanmod-edge-x64v1 -y
-			kernel_version=$(apt-cache show linux-xanmod-edge-x64v1 2>/dev/null | awk -F'[:, ]+' '/^Depends: / {for (i = 1; i <= NF; i++) if ($i ~ /^linux-image-/) {sub(/^linux-image-/, "", $i); print $i; exit}}')
-		fi
-		check_empty "${kernel_version}"
-	else
-		echo -e "${Error} 不支持当前系统 ${release} ${version} ${bit} !" && exit 1
-	fi
-
-	BBR_grub
-	echo -e "${Tip} 内核安装完毕，当前默认模式为保留旧内核，仅切换默认启动项，请参考上面的信息检查是否安装成功"
-}
-
-#检查官方xanmod rt内核并安装
-check_sys_official_xanmod_rt() {
-	check_version
-	wget -O check_x86-64_psabi.sh https://dl.xanmod.org/check_x86-64_psabi.sh
-	chmod +x check_x86-64_psabi.sh
-	cpu_level=$(./check_x86-64_psabi.sh | awk -F 'v' '{print $2}')
-	echo -e "CPU supports \033[32m${cpu_level}\033[0m"
-	# exit
-	if [[ ${bit} != "x86_64" ]]; then
-		echo -e "${Error} 不支持x86_64以外的系统 !" && exit 1
-	fi
-
-	if [[ "${OS_type}" == "Debian" ]]; then
-		apt update
-		apt-get install gnupg gnupg2 gnupg1 -y
-		echo 'deb http://deb.xanmod.org releases main' >/etc/apt/sources.list.d/xanmod-kernel.list
-		# --[ 已修改 ]-- 使用 gpg --dearmor 替换 apt-key
-		wget -qO - https://dl.xanmod.org/gpg.key | gpg --batch --yes --dearmor -o /etc/apt/trusted.gpg.d/xanmod-kernel.gpg
-		if [[ "${cpu_level}" == "4" ]]; then
-			apt update && apt install linux-xanmod-rt-x64v3 -y
-			kernel_version=$(apt-cache show linux-xanmod-rt-x64v3 2>/dev/null | awk -F'[:, ]+' '/^Depends: / {for (i = 1; i <= NF; i++) if ($i ~ /^linux-image-/) {sub(/^linux-image-/, "", $i); print $i; exit}}')
-		elif [[ "${cpu_level}" == "3" ]]; then
-			apt update && apt install linux-xanmod-rt-x64v3 -y
-			kernel_version=$(apt-cache show linux-xanmod-rt-x64v3 2>/dev/null | awk -F'[:, ]+' '/^Depends: / {for (i = 1; i <= NF; i++) if ($i ~ /^linux-image-/) {sub(/^linux-image-/, "", $i); print $i; exit}}')
-		elif [[ "${cpu_level}" == "2" ]]; then
-			apt update && apt install linux-xanmod-rt-x64v2 -y
-			kernel_version=$(apt-cache show linux-xanmod-rt-x64v2 2>/dev/null | awk -F'[:, ]+' '/^Depends: / {for (i = 1; i <= NF; i++) if ($i ~ /^linux-image-/) {sub(/^linux-image-/, "", $i); print $i; exit}}')
-		else
-			apt update && apt install linux-xanmod-rt-x64v1 -y
-			kernel_version=$(apt-cache show linux-xanmod-rt-x64v1 2>/dev/null | awk -F'[:, ]+' '/^Depends: / {for (i = 1; i <= NF; i++) if ($i ~ /^linux-image-/) {sub(/^linux-image-/, "", $i); print $i; exit}}')
-		fi
-		check_empty "${kernel_version}"
-	else
-		echo -e "${Error} 不支持当前系统 ${release} ${version} ${bit} !" && exit 1
-	fi
-
-	BBR_grub
-	echo -e "${Tip} 内核安装完毕，当前默认模式为保留旧内核，仅切换默认启动项，请参考上面的信息检查是否安装成功"
-}
-
-#检查Zen官方内核并安装
-check_sys_official_zen() {
-	check_version
-	if [[ ${bit} != "x86_64" ]]; then
-		echo -e "${Error} 不支持x86_64以外的系统 !" && exit 1
-	fi
-	if [[ "${release}" == "debian" ]]; then
-		curl 'https://liquorix.net/add-liquorix-repo.sh' | sudo bash
-		apt-get install linux-image-liquorix-amd64 linux-headers-liquorix-amd64 -y
-	elif [[ "${release}" == "ubuntu" ]]; then
-		if ! type add-apt-repository >/dev/null 2>&1; then
-			echo 'add-apt-repository 未安装 安装中'
-			apt-get install software-properties-common -y
-		else
-			echo 'add-apt-repository 已安装，继续'
-		fi
-		add-apt-repository ppa:damentz/liquorix && sudo apt-get update
-		apt-get install linux-image-liquorix-amd64 linux-headers-liquorix-amd64 -y
-	else
-		echo -e "${Error} 不支持当前系统 ${release} ${version} ${bit} !" && exit 1
-	fi
-
-	BBR_grub
-	echo -e "${Tip} 内核安装完毕，当前默认模式为保留旧内核，仅切换默认启动项，请参考上面的信息检查是否安装成功"
+	show_kernel_install_finish_notice
 }
 
 #检查系统当前状态
