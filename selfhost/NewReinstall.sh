@@ -6,6 +6,30 @@ if [[ $EUID -ne 0 ]]; then
     exit 1
 fi
 
+INSTALLNET_REMOTE_URL="${INSTALLNET_REMOTE_URL:-https://raw.githubusercontent.com/torr9522/InstallNET/yijianDD/scripts/InstallNET.sh}"
+INSTALLNET_CDN_URL="${INSTALLNET_CDN_URL:-https://cdn.jsdelivr.net/gh/torr9522/InstallNET@yijianDD/scripts/InstallNET.sh}"
+
+function PrepareInstallNET() {
+  local script_dir=''
+  local local_candidate=''
+
+  script_dir="$(cd -- "$(dirname -- "$0")" >/dev/null 2>&1 && pwd -P)"
+
+  for local_candidate in "$script_dir/InstallNET.sh" "/root/InstallNET.sh"; do
+    if [[ -f "$local_candidate" ]]; then
+      cp -f "$local_candidate" /tmp/InstallNET.sh && chmod a+x /tmp/InstallNET.sh
+      return 0
+    fi
+  done
+
+  if [[ "$isCN" == '1' ]]; then
+    wget --no-check-certificate -qO /tmp/InstallNET.sh "$INSTALLNET_CDN_URL" && chmod a+x /tmp/InstallNET.sh && return 0
+  fi
+
+  wget --no-check-certificate -qO /tmp/InstallNET.sh "$INSTALLNET_REMOTE_URL" && chmod a+x /tmp/InstallNET.sh && return 0
+  return 1
+}
+
 function CopyRight() {
   clear
   echo "########################################################"
@@ -153,11 +177,10 @@ function Start() {
     rm -f /tmp/InstallNET.sh
   fi
 
-  if [[ "$isCN" == '1' ]]; then
-   wget --no-check-certificate -qO /tmp/InstallNET.sh 'https://cdn.jsdelivr.net/gh/fcurrk/reinstall@master/InstallNET.sh' && chmod a+x /tmp/InstallNET.sh
-  else 
-   wget --no-check-certificate -qO /tmp/InstallNET.sh 'https://raw.githubusercontent.com/fcurrk/reinstall/master/InstallNET.sh' && chmod a+x /tmp/InstallNET.sh
-  fi
+  PrepareInstallNET || {
+    echo "Failed to prepare InstallNET.sh"
+    exit 1
+  }
   
   CMIRROR=''
   CVMIRROR=''
