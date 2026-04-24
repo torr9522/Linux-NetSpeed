@@ -5,7 +5,7 @@ export PATH
 #=================================================
 #	System Required: CentOS 7/8,Debian/ubuntu,oraclelinux
 #	Description: BBR+BBRplus+Lotserver
-#	Version: 100.0.4.16
+#	Version: 100.0.4.17
 #	Author: 千影,cx9208,YLX
 #	更新内容及反馈:  https://blog.ylx.me/archives/783.html
 #=================================================
@@ -16,7 +16,7 @@ export PATH
 # SKYBLUE='\033[0;36m'
 # PLAIN='\033[0m'
 
-sh_ver="100.0.4.16"
+sh_ver="100.0.4.17"
 github="raw.githubusercontent.com/torr9522/Linux-NetSpeed/tcp.sh"
 AUTO_CLEAN_OLD_KERNELS="${TCP_AUTO_CLEAN_OLD_KERNELS:-1}"
 KERNEL_MODE_BANNER="卸内核"
@@ -2009,6 +2009,17 @@ get_xanmod_repo_suite() {
 	echo "${suite}"
 }
 
+get_xanmod_fallback_suite() {
+	echo "${TCPX_XANMOD_FALLBACK_SUITE:-releases}"
+}
+
+xanmod_repo_suite_exists() {
+	local suite="$1"
+	local repo_base="${2:-$(get_xanmod_repo_base)}"
+
+	curl -fsSLI "${repo_base}/dists/${suite}/Release" >/dev/null 2>&1
+}
+
 xanmod_suite_supported() {
 	case "$1" in
 	bookworm | trixie | forky | sid | noble | plucky | questing | resolute | faye | gigi | wilma | xia | zara | zena)
@@ -2212,6 +2223,8 @@ check_sys_xanmod_main_kept() {
 	local xanmod_keyring_backup=""
 	local backup_suffix=""
 	local suite_overridden="0"
+	local fallback_suite=""
+	local auto_track="0"
 
 	if [[ ${bit} != "x86_64" ]]; then
 		echo -e "${Error} 不支持x86_64以外的系统 !" && exit 1
@@ -2221,6 +2234,9 @@ check_sys_xanmod_main_kept() {
 	xanmod_keyring="$(get_xanmod_keyring_file)"
 	xanmod_repo_base="$(get_xanmod_repo_base)"
 	[[ -n "${TCPX_XANMOD_REPO_SUITE:-}" ]] && suite_overridden="1"
+	if [[ -z "${TCPX_XANMOD_TRACK:-}" || "$(echo "${TCPX_XANMOD_TRACK}" | tr '[:upper:]' '[:lower:]')" == "auto" ]]; then
+		auto_track="1"
+	fi
 
 	cpu_level=$(get_xanmod_cpu_level)
 	check_empty "$cpu_level"
@@ -2230,14 +2246,30 @@ check_sys_xanmod_main_kept() {
 		xanmod_suite=$(get_xanmod_repo_suite)
 		check_empty "$xanmod_suite"
 		if [[ "${suite_overridden}" == "0" ]] && ! xanmod_suite_supported "${xanmod_suite}"; then
-			echo -e "${Error} 当前发行版代号 ${xanmod_suite} 不在 XanMod 官方当前支持列表内。"
-			echo -e "${Tip} 若你有自建镜像或明确知道可用 suite，可通过环境变量 TCPX_XANMOD_REPO_SUITE 手动覆盖。"
-			return 1
+			fallback_suite=$(get_xanmod_fallback_suite)
+			if [[ -n "${fallback_suite}" ]] && xanmod_repo_suite_exists "${fallback_suite}" "${xanmod_repo_base}"; then
+				echo -e "${Tip} 当前发行版代号 ${xanmod_suite} 不在 XanMod 官方当前支持列表内，自动回退到 suite: ${fallback_suite}"
+				xanmod_suite="${fallback_suite}"
+				if [[ "${auto_track}" == "1" ]]; then
+					xanmod_track="lts"
+					echo -e "${Tip} 当前系统按旧发行版处理，自动切换为 XanMod LTS 分支。"
+				fi
+			else
+				echo -e "${Error} 当前发行版代号 ${xanmod_suite} 不在 XanMod 官方当前支持列表内。"
+				echo -e "${Tip} 若你有自建镜像或明确知道可用 suite，可通过环境变量 TCPX_XANMOD_REPO_SUITE 手动覆盖。"
+				return 1
+			fi
 		fi
-		xanmod_track=$(get_xanmod_track "${xanmod_suite}" "${cpu_level}") || {
+		if [[ -z "${xanmod_track}" ]]; then
+			xanmod_track=$(get_xanmod_track "${xanmod_suite}" "${cpu_level}") || {
+				echo -e "${Error} TCPX_XANMOD_TRACK 仅支持 auto/main/lts/edge/rt。"
+				return 1
+			}
+		fi
+		if [[ -z "${xanmod_track}" ]]; then
 			echo -e "${Error} TCPX_XANMOD_TRACK 仅支持 auto/main/lts/edge/rt。"
 			return 1
-		}
+		fi
 		xanmod_package=$(get_xanmod_target_package "${cpu_level}" "${xanmod_track}") || {
 			echo -e "${Error} CPU x86-64-v${cpu_level} 不支持 XanMod ${xanmod_track} 分支，请改用 LTS 或提升 CPU 平台。"
 			return 1
