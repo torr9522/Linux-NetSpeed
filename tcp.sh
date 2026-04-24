@@ -16,7 +16,7 @@ export PATH
 # SKYBLUE='\033[0;36m'
 # PLAIN='\033[0m'
 
-sh_ver="100.0.4.15-local"
+sh_ver="100.0.4.16"
 github="raw.githubusercontent.com/torr9522/Linux-NetSpeed/tcp.sh"
 AUTO_CLEAN_OLD_KERNELS="${TCP_AUTO_CLEAN_OLD_KERNELS:-1}"
 KERNEL_MODE_BANNER="卸内核"
@@ -1936,32 +1936,382 @@ check_sys_xanmod() {
 }
 
 #检查保留的xanmod main内核并安装
+cpu_has_all_flags() {
+	local flags="$1"
+	shift
+	local flag=""
+	for flag in "$@"; do
+		[[ " ${flags} " == *" ${flag} "* ]] || return 1
+	done
+	return 0
+}
+
+get_xanmod_cpu_level_local() {
+	local flags=""
+
+	flags=$(awk -F: '/^flags[[:space:]]*:/ {print tolower($2); exit}' /proc/cpuinfo 2>/dev/null | xargs)
+	if [[ -z "${flags}" ]]; then
+		echo "1"
+		return 0
+	fi
+
+	if cpu_has_all_flags "${flags}" ssse3 sse4_1 sse4_2 popcnt cx16 lahf_lm; then
+		if cpu_has_all_flags "${flags}" avx avx2 bmi1 bmi2 f16c fma movbe xsave && [[ " ${flags} " == *" abm "* || " ${flags} " == *" lzcnt "* ]]; then
+			if cpu_has_all_flags "${flags}" avx512f avx512bw avx512cd avx512dq avx512vl; then
+				echo "4"
+			else
+				echo "3"
+			fi
+		else
+			echo "2"
+		fi
+	else
+		echo "1"
+	fi
+}
+
+get_xanmod_keyring_file() {
+	echo "${TCPX_XANMOD_KEYRING_FILE:-/etc/apt/keyrings/xanmod-archive-keyring.gpg}"
+}
+
+get_xanmod_repo_list_file() {
+	echo "${TCPX_XANMOD_REPO_LIST_FILE:-/etc/apt/sources.list.d/xanmod-release.list}"
+}
+
+get_xanmod_repo_base() {
+	echo "${TCPX_XANMOD_REPO_BASE:-http://deb.xanmod.org}"
+}
+
+get_xanmod_key_url() {
+	echo "${TCPX_XANMOD_KEY_URL:-https://dl.xanmod.org/archive.key}"
+}
+
+get_xanmod_keyservers() {
+	echo "${TCPX_XANMOD_KEYSERVERS:-hkps://keyserver.ubuntu.com hkp://keyserver.ubuntu.com:80}"
+}
+
+get_xanmod_repo_suite() {
+	local suite="${TCPX_XANMOD_REPO_SUITE:-}"
+
+	if [[ -n "${suite}" ]]; then
+		echo "${suite}" | tr '[:upper:]' '[:lower:]'
+		return 0
+	fi
+
+	if _exists lsb_release; then
+		suite=$(lsb_release -sc 2>/dev/null | tr '[:upper:]' '[:lower:]')
+	fi
+
+	if [[ -z "${suite}" && -r /etc/os-release ]]; then
+		suite=$(awk -F= '/^VERSION_CODENAME=/{gsub(/"/, "", $2); print tolower($2); exit} /^UBUNTU_CODENAME=/{gsub(/"/, "", $2); print tolower($2); exit}' /etc/os-release)
+	fi
+
+	echo "${suite}"
+}
+
+xanmod_suite_supported() {
+	case "$1" in
+	bookworm | trixie | forky | sid | noble | plucky | questing | resolute | faye | gigi | wilma | xia | zara | zena)
+		return 0
+		;;
+	*)
+		return 1
+		;;
+	esac
+}
+
+get_xanmod_track() {
+	local suite="$1"
+	local cpu_level="$2"
+	local track="${TCPX_XANMOD_TRACK:-auto}"
+
+	track=$(echo "${track}" | tr '[:upper:]' '[:lower:]')
+	if [[ -z "${track}" || "${track}" == "auto" ]]; then
+		if [[ "${cpu_level}" == "1" || "${suite}" == "bookworm" || "${suite}" == "faye" ]]; then
+			echo "lts"
+		else
+			echo "main"
+		fi
+		return 0
+	fi
+
+	case "${track}" in
+	main | edge | lts | rt)
+		echo "${track}"
+		;;
+	*)
+		return 1
+		;;
+	esac
+}
+
+get_xanmod_cpu_level() {
+	local tmp_script=""
+	local level=""
+
+	if [[ "${TCPX_XANMOD_FORCE_CPU_LEVEL:-}" =~ ^[1-4]$ ]]; then
+		echo "${TCPX_XANMOD_FORCE_CPU_LEVEL}"
+		return 0
+	fi
+
+	tmp_script="$(mktemp /tmp/check_x86-64_psabi.XXXXXX.sh)"
+	if (_exists curl && curl -fsSL "https://dl.xanmod.org/check_x86-64_psabi.sh" -o "${tmp_script}") || (_exists wget && wget -qO "${tmp_script}" "https://dl.xanmod.org/check_x86-64_psabi.sh"); then
+		chmod +x "${tmp_script}"
+		level=$("${tmp_script}" 2>/dev/null | grep -oE 'v[1-4]' | tail -n1 | tr -d 'v')
+	fi
+	rm -f "${tmp_script}"
+
+	if [[ "${level}" =~ ^[1-4]$ ]]; then
+		echo "${level}"
+		return 0
+	fi
+
+	echo -e "${Tip} 无法从 XanMod 站点获取 CPU 检测脚本，改用本地 CPU flags 判断档位。"
+	get_xanmod_cpu_level_local
+}
+
+install_xanmod_archive_keyring() {
+	local keyring_file=""
+	local key_url=""
+	local keyservers=""
+	local key_id="86F7D09EE734E623"
+	local tmp_key_file=""
+	local tmp_keyring=""
+	local tmp_gnupg=""
+	local method=""
+	local keyserver=""
+
+	keyring_file="$(get_xanmod_keyring_file)"
+	key_url="$(get_xanmod_key_url)"
+	keyservers="$(get_xanmod_keyservers)"
+	mkdir -p "$(dirname "${keyring_file}")"
+
+	tmp_key_file="$(mktemp /tmp/xanmod-archive-key.XXXXXX.asc)"
+	tmp_keyring="$(mktemp /tmp/xanmod-archive-keyring.XXXXXX.gpg)"
+
+	if (_exists curl && curl -fsSL "${key_url}" -o "${tmp_key_file}") || (_exists wget && wget -qO "${tmp_key_file}" "${key_url}"); then
+		if [[ -s "${tmp_key_file}" ]] && gpg --batch --yes --dearmor -o "${tmp_keyring}" "${tmp_key_file}" >/dev/null 2>&1; then
+			method="download"
+		fi
+	fi
+
+	if [[ -z "${method}" ]]; then
+		echo -e "${Tip} XanMod 公钥下载失败，改用 keyserver 导入公钥 ${key_id}。"
+		tmp_gnupg="$(mktemp -d /tmp/xanmod-gnupg.XXXXXX)"
+		chmod 700 "${tmp_gnupg}"
+		for keyserver in ${keyservers}; do
+			if GNUPGHOME="${tmp_gnupg}" gpg --batch --keyserver "${keyserver}" --recv-keys "${key_id}" >/dev/null 2>&1; then
+				if GNUPGHOME="${tmp_gnupg}" gpg --batch --yes --output "${tmp_keyring}" --export "${key_id}" >/dev/null 2>&1 && [[ -s "${tmp_keyring}" ]]; then
+					method="keyserver:${keyserver}"
+					break
+				fi
+			fi
+		done
+	fi
+
+	rm -f "${tmp_key_file}"
+	if [[ -n "${tmp_gnupg}" ]]; then
+		rm -rf "${tmp_gnupg}"
+	fi
+
+	if [[ -z "${method}" || ! -s "${tmp_keyring}" ]]; then
+		rm -f "${tmp_keyring}"
+		return 1
+	fi
+
+	install -m 644 "${tmp_keyring}" "${keyring_file}"
+	rm -f "${tmp_keyring}"
+	echo -e "${Info} XanMod 仓库公钥已通过 ${method} 方式安装。"
+	return 0
+}
+
+get_xanmod_target_package() {
+	local cpu_level="$1"
+	local track="$2"
+
+	case "${track}" in
+	main)
+		case "${cpu_level}" in
+		4 | 3)
+			echo "linux-xanmod-x64v3"
+			;;
+		2)
+			echo "linux-xanmod-x64v2"
+			;;
+		*)
+			return 1
+			;;
+		esac
+		;;
+	edge)
+		case "${cpu_level}" in
+		4 | 3)
+			echo "linux-xanmod-edge-x64v3"
+			;;
+		2)
+			echo "linux-xanmod-edge-x64v2"
+			;;
+		*)
+			return 1
+			;;
+		esac
+		;;
+	rt)
+		case "${cpu_level}" in
+		4 | 3)
+			echo "linux-xanmod-rt-x64v3"
+			;;
+		2)
+			echo "linux-xanmod-rt-x64v2"
+			;;
+		*)
+			return 1
+			;;
+		esac
+		;;
+	lts)
+		case "${cpu_level}" in
+		4 | 3)
+			echo "linux-xanmod-lts-x64v3"
+			;;
+		2)
+			echo "linux-xanmod-lts-x64v2"
+			;;
+		*)
+			echo "linux-xanmod-lts-x64v1"
+			;;
+		esac
+		;;
+	*)
+		return 1
+		;;
+	esac
+}
+
+get_xanmod_kernel_version_from_meta() {
+	local meta_package="$1"
+	local resolved=""
+
+	resolved=$(apt-cache show "${meta_package}" 2>/dev/null | awk -F'[:, ]+' '/^Depends: / {for (i = 1; i <= NF; i++) if ($i ~ /^linux-image-/) {sub(/^linux-image-/, "", $i); print $i; exit}}')
+	if [[ -z "${resolved}" ]]; then
+		resolved=$(apt-cache depends "${meta_package}" 2>/dev/null | awk '/Depends: linux-image-/ {sub(/^.*Depends: linux-image-/, ""); gsub(/[[:space:]]+/, ""); print; exit}')
+	fi
+	echo "${resolved}"
+}
+
 check_sys_xanmod_main_kept() {
 	check_version
-	wget -O check_x86-64_psabi.sh https://dl.xanmod.org/check_x86-64_psabi.sh
-	chmod +x check_x86-64_psabi.sh
-	cpu_level=$(./check_x86-64_psabi.sh | awk -F 'v' '{print $2}')
-	echo -e "CPU supports \033[32m${cpu_level}\033[0m"
+	local cpu_level=""
+	local xanmod_suite=""
+	local xanmod_track=""
+	local xanmod_package=""
+	local xanmod_list=""
+	local xanmod_keyring=""
+	local xanmod_repo_base=""
+	local xanmod_list_backup=""
+	local xanmod_keyring_backup=""
+	local backup_suffix=""
+	local suite_overridden="0"
 
 	if [[ ${bit} != "x86_64" ]]; then
 		echo -e "${Error} 不支持x86_64以外的系统 !" && exit 1
 	fi
 
+	xanmod_list="$(get_xanmod_repo_list_file)"
+	xanmod_keyring="$(get_xanmod_keyring_file)"
+	xanmod_repo_base="$(get_xanmod_repo_base)"
+	[[ -n "${TCPX_XANMOD_REPO_SUITE:-}" ]] && suite_overridden="1"
+
+	cpu_level=$(get_xanmod_cpu_level)
+	check_empty "$cpu_level"
+	echo -e "CPU supports \033[32mv${cpu_level}\033[0m"
+
 	if [[ "${OS_type}" == "Debian" ]]; then
-		apt update
-		apt-get install gnupg ca-certificates wget -y
-		wget -qO- https://dl.xanmod.org/archive.key | gpg --batch --yes --dearmor -o /usr/share/keyrings/xanmod-archive-keyring.gpg
-		echo 'deb [signed-by=/usr/share/keyrings/xanmod-archive-keyring.gpg] http://deb.xanmod.org releases main' >/etc/apt/sources.list.d/xanmod-kernel.list
-		if [[ "${cpu_level}" == "4" || "${cpu_level}" == "3" ]]; then
-			apt update && apt install linux-xanmod-x64v3 -y
-			kernel_version=$(apt-cache show linux-xanmod-x64v3 2>/dev/null | awk -F'[:, ]+' '/^Depends: / {for (i = 1; i <= NF; i++) if ($i ~ /^linux-image-/) {sub(/^linux-image-/, "", $i); print $i; exit}}')
-		elif [[ "${cpu_level}" == "2" ]]; then
-			apt update && apt install linux-xanmod-x64v2 -y
-			kernel_version=$(apt-cache show linux-xanmod-x64v2 2>/dev/null | awk -F'[:, ]+' '/^Depends: / {for (i = 1; i <= NF; i++) if ($i ~ /^linux-image-/) {sub(/^linux-image-/, "", $i); print $i; exit}}')
-		else
-			apt update && apt install linux-xanmod-x64v1 -y
-			kernel_version=$(apt-cache show linux-xanmod-x64v1 2>/dev/null | awk -F'[:, ]+' '/^Depends: / {for (i = 1; i <= NF; i++) if ($i ~ /^linux-image-/) {sub(/^linux-image-/, "", $i); print $i; exit}}')
+		xanmod_suite=$(get_xanmod_repo_suite)
+		check_empty "$xanmod_suite"
+		if [[ "${suite_overridden}" == "0" ]] && ! xanmod_suite_supported "${xanmod_suite}"; then
+			echo -e "${Error} 当前发行版代号 ${xanmod_suite} 不在 XanMod 官方当前支持列表内。"
+			echo -e "${Tip} 若你有自建镜像或明确知道可用 suite，可通过环境变量 TCPX_XANMOD_REPO_SUITE 手动覆盖。"
+			return 1
 		fi
+		xanmod_track=$(get_xanmod_track "${xanmod_suite}" "${cpu_level}") || {
+			echo -e "${Error} TCPX_XANMOD_TRACK 仅支持 auto/main/lts/edge/rt。"
+			return 1
+		}
+		xanmod_package=$(get_xanmod_target_package "${cpu_level}" "${xanmod_track}") || {
+			echo -e "${Error} CPU x86-64-v${cpu_level} 不支持 XanMod ${xanmod_track} 分支，请改用 LTS 或提升 CPU 平台。"
+			return 1
+		}
+
+		echo -e "${Info} XanMod suite: ${xanmod_suite}  track: ${xanmod_track}  package: ${xanmod_package}"
+		backup_suffix=".$(date +%s)"
+		if [[ -f "${xanmod_list}" ]]; then
+			xanmod_list_backup="${xanmod_list}${backup_suffix}.bak"
+			mv "${xanmod_list}" "${xanmod_list_backup}"
+			echo -e "${Tip} 已临时禁用旧的 XanMod 源，避免 apt 被历史残留配置阻塞。"
+		fi
+		if [[ -f "${xanmod_keyring}" ]]; then
+			xanmod_keyring_backup="${xanmod_keyring}${backup_suffix}.bak"
+			cp -f "${xanmod_keyring}" "${xanmod_keyring_backup}"
+		fi
+
+		if ! (apt-get update || apt-get --allow-releaseinfo-change update); then
+			if [[ -n "${xanmod_list_backup}" && -f "${xanmod_list_backup}" ]]; then
+				mv "${xanmod_list_backup}" "${xanmod_list}"
+			fi
+			if [[ -n "${xanmod_keyring_backup}" && -f "${xanmod_keyring_backup}" ]]; then
+				mv "${xanmod_keyring_backup}" "${xanmod_keyring}"
+			fi
+			echo -e "${Error} 初始化 APT 索引失败，请先检查系统源是否正常。"
+			return 1
+		fi
+
+		if ! apt-get install gnupg ca-certificates wget curl -y; then
+			if [[ -n "${xanmod_list_backup}" && -f "${xanmod_list_backup}" ]]; then
+				mv "${xanmod_list_backup}" "${xanmod_list}"
+			fi
+			if [[ -n "${xanmod_keyring_backup}" && -f "${xanmod_keyring_backup}" ]]; then
+				mv "${xanmod_keyring_backup}" "${xanmod_keyring}"
+			fi
+			echo -e "${Error} 安装 XanMod 所需依赖失败。"
+			return 1
+		fi
+
+		if ! install_xanmod_archive_keyring; then
+			if [[ -n "${xanmod_list_backup}" && -f "${xanmod_list_backup}" ]]; then
+				mv "${xanmod_list_backup}" "${xanmod_list}"
+			fi
+			if [[ -n "${xanmod_keyring_backup}" && -f "${xanmod_keyring_backup}" ]]; then
+				mv "${xanmod_keyring_backup}" "${xanmod_keyring}"
+			else
+				rm -f "${xanmod_keyring}"
+			fi
+			echo -e "${Error} XanMod 仓库公钥安装失败，请检查目标机到 dl.xanmod.org / keyserver 的连通性。"
+			return 1
+		fi
+
+		echo "deb [signed-by=${xanmod_keyring}] ${xanmod_repo_base} ${xanmod_suite} main" >"${xanmod_list}"
+		if ! (apt-get update || apt-get --allow-releaseinfo-change update); then
+			rm -f "${xanmod_list}"
+			if [[ -n "${xanmod_list_backup}" && -f "${xanmod_list_backup}" ]]; then
+				mv "${xanmod_list_backup}" "${xanmod_list}"
+			fi
+			if [[ -n "${xanmod_keyring_backup}" && -f "${xanmod_keyring_backup}" ]]; then
+				mv "${xanmod_keyring_backup}" "${xanmod_keyring}"
+			else
+				rm -f "${xanmod_keyring}"
+			fi
+			echo -e "${Error} XanMod 仓库索引刷新失败，已回滚 APT 源配置。"
+			return 1
+		fi
+
+		rm -f "${xanmod_list_backup}" "${xanmod_keyring_backup}"
+
+		if ! apt-get install "${xanmod_package}" -y; then
+			echo -e "${Error} XanMod 内核包安装失败。"
+			return 1
+		fi
+		kernel_version=$(get_xanmod_kernel_version_from_meta "${xanmod_package}")
 		check_empty "$kernel_version"
 	else
 		echo -e "${Error} 不支持当前系统 ${release} ${version} ${bit} !" && exit 1
