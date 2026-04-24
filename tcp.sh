@@ -2013,13 +2013,6 @@ get_xanmod_fallback_suite() {
 	echo "${TCPX_XANMOD_FALLBACK_SUITE:-releases}"
 }
 
-xanmod_repo_suite_exists() {
-	local suite="$1"
-	local repo_base="${2:-$(get_xanmod_repo_base)}"
-
-	curl -fsSLI "${repo_base}/dists/${suite}/Release" >/dev/null 2>&1
-}
-
 xanmod_suite_supported() {
 	case "$1" in
 	bookworm | trixie | forky | sid | noble | plucky | questing | resolute | faye | gigi | wilma | xia | zara | zena)
@@ -2247,7 +2240,7 @@ check_sys_xanmod_main_kept() {
 		check_empty "$xanmod_suite"
 		if [[ "${suite_overridden}" == "0" ]] && ! xanmod_suite_supported "${xanmod_suite}"; then
 			fallback_suite=$(get_xanmod_fallback_suite)
-			if [[ -n "${fallback_suite}" ]] && xanmod_repo_suite_exists "${fallback_suite}" "${xanmod_repo_base}"; then
+			if [[ -n "${fallback_suite}" ]]; then
 				echo -e "${Tip} 当前发行版代号 ${xanmod_suite} 不在 XanMod 官方当前支持列表内，自动回退到 suite: ${fallback_suite}"
 				xanmod_suite="${fallback_suite}"
 				if [[ "${auto_track}" == "1" ]]; then
