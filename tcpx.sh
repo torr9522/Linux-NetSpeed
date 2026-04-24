@@ -2070,7 +2070,7 @@ get_xanmod_cpu_level() {
 		return 0
 	fi
 
-	echo -e "${Tip} 无法从 XanMod 站点获取 CPU 检测脚本，改用本地 CPU flags 判断档位。"
+	echo -e "${Tip} 无法从 XanMod 站点获取 CPU 检测脚本，改用本地 CPU flags 判断档位。" >&2
 	get_xanmod_cpu_level_local
 }
 
