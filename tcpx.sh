@@ -2010,7 +2010,7 @@ get_xanmod_repo_suite() {
 }
 
 get_xanmod_fallback_suite() {
-	echo "${TCPX_XANMOD_FALLBACK_SUITE:-releases}"
+	echo "${TCPX_XANMOD_FALLBACK_SUITE:-bookworm}"
 }
 
 xanmod_suite_supported() {
